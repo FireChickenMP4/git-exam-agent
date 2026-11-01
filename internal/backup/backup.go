@@ -21,8 +21,8 @@ const (
 	dataEntry = "data"
 )
 
-// Create 备份数据库快照与数据目录（排除 backups/judge 临时目录）。
-func Create(st *store.Store, dataDir, out string) error {
+// Create 备份数据库快照与数据目录（排除 live db/wal/shm、backups、judge 临时目录）。
+func Create(st *store.Store, dbPath, dataDir, out string) error {
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 		return fmt.Errorf("创建备份目录: %w", err)
 	}
@@ -37,22 +37,33 @@ func Create(st *store.Store, dataDir, out string) error {
 		return err
 	}
 
-	f, err := os.Create(out)
+	tmpOut := out + ".tmp"
+	f, err := os.Create(tmpOut)
 	if err != nil {
 		return fmt.Errorf("创建备份文件: %w", err)
 	}
-	defer f.Close()
+	ok := false
+	defer func() {
+		if !ok {
+			_ = os.Remove(tmpOut)
+		}
+	}()
 
 	gz := gzip.NewWriter(f)
 	tw := tar.NewWriter(gz)
 
 	if err := addFile(tw, snapshot, dbEntry); err != nil {
+		f.Close()
 		return err
 	}
 	if dataDir != "" {
 		if _, err := os.Stat(dataDir); err == nil {
 			err := filepath.Walk(dataDir, func(p string, info os.FileInfo, err error) error {
 				if err != nil {
+					return nil
+				}
+				abs, _ := filepath.Abs(p)
+				if abs == dbPath || abs == dbPath+"-wal" || abs == dbPath+"-shm" {
 					return nil
 				}
 				rel, err := filepath.Rel(dataDir, p)
@@ -73,15 +84,28 @@ func Create(st *store.Store, dataDir, out string) error {
 				return addFile(tw, p, filepath.ToSlash(filepath.Join(dataEntry, rel)))
 			})
 			if err != nil {
+				f.Close()
 				return err
 			}
 		}
 	}
 
 	if err := tw.Close(); err != nil {
+		f.Close()
 		return err
 	}
-	return gz.Close()
+	if err := gz.Close(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpOut, out); err != nil {
+		return fmt.Errorf("写入备份文件: %w", err)
+	}
+	ok = true
+	return nil
 }
 
 // Restore 从备份恢复；force 为 true 时覆盖已有数据库。
@@ -111,9 +135,33 @@ func Restore(in, dbPath, dataDir string, force bool) error {
 
 	srcData := filepath.Join(tmp, dataEntry)
 	if _, err := os.Stat(srcData); err == nil {
-		if err := copyTree(srcData, dataDir); err != nil {
+		skip := map[string]bool{
+			dbPath:          true,
+			dbPath + "-wal": true,
+			dbPath + "-shm": true,
+		}
+		if err := copyTree(srcData, dataDir, skip); err != nil {
 			return fmt.Errorf("恢复数据目录: %w", err)
 		}
+	}
+	if err := quickCheck(dbPath); err != nil {
+		return err
+	}
+	return nil
+}
+
+func quickCheck(dbPath string) error {
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(dbPath)+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		return fmt.Errorf("打开恢复后的数据库: %w", err)
+	}
+	defer db.Close()
+	var result string
+	if err := db.QueryRow(`PRAGMA quick_check`).Scan(&result); err != nil {
+		return fmt.Errorf("校验恢复后的数据库: %w", err)
+	}
+	if strings.ToLower(result) != "ok" {
+		return fmt.Errorf("恢复后的数据库校验失败: %s", result)
 	}
 	return nil
 }
@@ -216,7 +264,7 @@ func copyFile(src, dst string) error {
 	return out.Close()
 }
 
-func copyTree(src, dst string) error {
+func copyTree(src, dst string, skip map[string]bool) error {
 	return filepath.Walk(src, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -226,6 +274,12 @@ func copyTree(src, dst string) error {
 			return err
 		}
 		target := filepath.Join(dst, rel)
+		if skip != nil {
+			abs, _ := filepath.Abs(target)
+			if skip[abs] {
+				return nil
+			}
+		}
 		if info.IsDir() {
 			return os.MkdirAll(target, 0o755)
 		}

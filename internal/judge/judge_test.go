@@ -96,6 +96,15 @@ func main() { time.Sleep(5 * time.Second) }
 			score:    0,
 			extraRun: 200 * time.Millisecond,
 		},
+		{
+			name: "output_limit",
+			code: `package main
+import "fmt"
+func main() { for { fmt.Println("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx") } }
+`,
+			status: "output_limit",
+			score:  0,
+		},
 	}
 
 	for _, tc := range cases {
@@ -259,5 +268,57 @@ func main() { var a, b int; fmt.Scan(&a, &b); fmt.Println(a + b) }
 	}
 	if rows[0].Status != "accepted" || rows[0].Score != 100 {
 		t.Fatalf("落库内容错误: %+v", rows[0])
+	}
+}
+
+func TestHostPathMapping(t *testing.T) {
+	work := filepath.Join(t.TempDir(), "app", "data", "judge")
+	host := filepath.Join(t.TempDir(), "srv", "exam", "data", "judge")
+	r := &Runner{opts: Options{WorkDir: work, HostWorkDir: host}}
+
+	got := r.hostPath(filepath.Join(work, "repos", "run1", "20231234"))
+	if got != filepath.Join(host, "repos", "run1", "20231234") {
+		t.Fatalf("hostPath = %s", got)
+	}
+	outside := filepath.Join(t.TempDir(), "other")
+	if got := r.hostPath(outside); got != outside {
+		t.Fatalf("工作区外路径不应映射: %s", got)
+	}
+	if got := (&Runner{opts: Options{WorkDir: work}}).hostPath(work); got != work {
+		t.Fatalf("未配置 HostWorkDir 时应原样返回: %s", got)
+	}
+}
+
+func TestRunExamPersistsFailure(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "judge.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.CreateExam(&store.Exam{ID: "fail", Title: "fail", StartsAt: time.Now().Add(-time.Hour), EndsAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertCandidate(&store.Candidate{ExamID: "fail", StudentNo: "20231234", Name: "张三"}); err != nil {
+		t.Fatal(err)
+	}
+
+	runner := New(Options{
+		Runtime: "local", GoBin: "go", WorkDir: t.TempDir(), DataDir: t.TempDir(),
+		CompileTimeout: 30 * time.Second, DefaultRunTimeout: time.Second,
+		MemoryMB: 256, CompileConcurrency: 1, RunConcurrency: 1,
+	}, st)
+	results, err := runner.RunExam(context.Background(), "fail", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Status != "no_repo" {
+		t.Fatalf("结果错误: %+v", results)
+	}
+	rows, err := st.ListJudgeResults("fail")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].ProblemID != 0 || rows[0].Status != "no_repo" {
+		t.Fatalf("失败结果未落库: %+v", rows)
 	}
 }

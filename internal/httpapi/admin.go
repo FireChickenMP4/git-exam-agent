@@ -131,12 +131,12 @@ func (s *Server) handleAdminCreateExam(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "标题不能为空")
 		return
 	}
-	starts, err := parseTime(req.StartsAt)
+	starts, err := s.parseTime(req.StartsAt)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "开始时间格式错误")
 		return
 	}
-	ends, err := parseTime(req.EndsAt)
+	ends, err := s.parseTime(req.EndsAt)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "结束时间格式错误")
 		return
@@ -231,7 +231,7 @@ func (s *Server) handleAdminProvision(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "未配置 Gitea")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Minute)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 20*time.Minute)
 	defer cancel()
 
 	summary, err := s.Provisioner().Run(ctx, exam.ID)
@@ -340,14 +340,21 @@ func (s *Server) handleAdminClose(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := s.st.SetExamStatus(exam.ID, "closed"); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
 	admin := adminFrom(r)
 	actor := ""
 	if admin != nil {
 		actor = admin.Username
+	}
+	// 先冻结（记录 final commit、归档、拒绝推送），再置 closed。
+	if exam.Status != "frozen" && exam.Status != "closed" {
+		if _, _, err := s.FreezeExam(r.Context(), exam.ID, actor); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	if err := s.st.SetExamStatus(exam.ID, "closed"); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 	_ = s.st.AddAudit(exam.ID, "admin", actor, "exam.close", exam.ID, "")
 	exam.Status = "closed"
@@ -457,7 +464,7 @@ func (s *Server) handleAdminJudge(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Minute)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 60*time.Minute)
 	defer cancel()
 
 	results, err := s.NewJudgeRunner().RunExam(ctx, exam.ID, "")
@@ -548,7 +555,7 @@ func (s *Server) handleAdminReview(w http.ResponseWriter, r *http.Request) {
 		opts.InsecureSkipTLS = s.gc.InsecureSkipTLS()
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Minute)
 	defer cancel()
 	rows, err := review.Run(ctx, s.st, exam.ID, req.Student, opts)
 	if err != nil {

@@ -24,6 +24,7 @@ const (
 	autoCommitMessage       = "agent: auto-commit"
 	heartbeatCommitMessage  = "agent: heartbeat"
 	checkpointCommitMessage = "agent: checkpoint"
+	recoverCommitMessage    = "agent: recover onto remote main"
 )
 
 // 提交白名单见 internal/paths，与 pre-receive 钩子保持一致。
@@ -171,4 +172,50 @@ func (a *Agent) pushRemote() error {
 		return nil
 	}
 	return err
+}
+
+func isNonFastForward(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "non-fast-forward")
+}
+
+// recoverDiverged 处理历史分叉：备份本地 main，重置到远端 main，再提交工作区并推送。
+func (a *Agent) recoverDiverged(now time.Time) (string, error) {
+	head, err := a.repo.Head()
+	if err != nil {
+		return "", fmt.Errorf("读取本地 HEAD: %w", err)
+	}
+	backup := "agent-backup-" + now.Format("20060102-150405")
+	if err := a.repo.Storer.SetReference(
+		plumbing.NewHashReference(plumbing.NewBranchReferenceName(backup), head.Hash())); err != nil {
+		return "", fmt.Errorf("创建备份分支: %w", err)
+	}
+	if err := a.repo.Fetch(&git.FetchOptions{
+		RemoteName:      "origin",
+		RefSpecs:        []config.RefSpec{"+refs/heads/" + branchName + ":refs/remotes/origin/" + branchName},
+		Auth:            a.auth,
+		Tags:            git.NoTags,
+		CABundle:        a.caBundle,
+		InsecureSkipTLS: a.cfg.InsecureSkipVerify,
+	}); err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
+		return backup, fmt.Errorf("拉取远端 main: %w", err)
+	}
+	remoteRef, err := a.repo.Reference(plumbing.NewRemoteReferenceName("origin", branchName), true)
+	if err != nil {
+		return backup, fmt.Errorf("读取远端 main: %w", err)
+	}
+	if err := a.wt.Reset(&git.ResetOptions{Commit: remoteRef.Hash(), Mode: git.MixedReset}); err != nil {
+		return backup, fmt.Errorf("重置到远端 main: %w", err)
+	}
+	res, err := a.commitAll(recoverCommitMessage, now, false)
+	if err != nil {
+		return backup, err
+	}
+	if res.SHA != "" {
+		a.commitSHA = res.SHA
+		a.lastCommit = now
+	}
+	if err := a.pushRemote(); err != nil {
+		return backup, fmt.Errorf("恢复后推送: %w", err)
+	}
+	return backup, nil
 }

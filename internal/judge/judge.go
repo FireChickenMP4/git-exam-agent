@@ -29,6 +29,7 @@ type Options struct {
 	Image              string
 	GoBin              string
 	WorkDir            string
+	HostWorkDir        string
 	DataDir            string
 	CompileTimeout     time.Duration
 	DefaultRunTimeout  time.Duration
@@ -102,9 +103,23 @@ func New(opts Options, st *store.Store) *Runner {
 
 // RunExam 判整个场次，onlyStudent 非空时只判一人。
 func (r *Runner) RunExam(ctx context.Context, examID, onlyStudent string) ([]CandidateResult, error) {
+	if r.opts.Runtime == "docker" && r.opts.HostWorkDir == "" && inContainer() {
+		return nil, fmt.Errorf("examd 运行在容器内时必须配置 judge.host_work_dir（容器内 %s 对应的宿主机路径）", r.opts.WorkDir)
+	}
 	if _, err := r.st.GetExam(examID); err != nil {
 		return nil, err
 	}
+	runID := fmt.Sprintf("%d", time.Now().UnixNano())
+	scope := "judge:" + examID
+	acquired, err := r.st.AcquireJudgeLock(scope, runID, 2*time.Hour)
+	if err != nil {
+		return nil, err
+	}
+	if !acquired {
+		return nil, fmt.Errorf("已有判题任务在运行，请等待其结束")
+	}
+	defer func() { _ = r.st.ReleaseJudgeLock(scope, runID) }()
+	runDir := filepath.Join(r.opts.WorkDir, "repos", runID)
 	problems, err := r.st.ListProblems(examID)
 	if err != nil {
 		return nil, err
@@ -130,12 +145,9 @@ func (r *Runner) RunExam(ctx context.Context, examID, onlyStudent string) ([]Can
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			res := r.judgeCandidate(ctx, &candidates[i], problems)
+			res := r.judgeCandidate(ctx, &candidates[i], problems, runDir)
 			slots[i].result = &res
 
-			if len(res.Problems) == 0 {
-				return
-			}
 			rows := make([]store.JudgeResult, 0, len(res.Problems))
 			for _, p := range res.Problems {
 				detail, _ := json.Marshal(p)
@@ -147,6 +159,21 @@ func (r *Runner) RunExam(ctx context.Context, examID, onlyStudent string) ([]Can
 					Passed:      p.Passed,
 					Total:       p.Total,
 					Score:       p.Score,
+					DetailJSON:  string(detail),
+				})
+			}
+			if len(rows) == 0 {
+				// 没有题面结果时也要清掉旧成绩，避免报表沿用上一次判题。
+				detail, _ := json.Marshal(map[string]any{
+					"status": res.Status,
+					"error":  res.Error,
+					"final":  res.FinalSHA,
+				})
+				rows = append(rows, store.JudgeResult{
+					CandidateID: candidates[i].ID,
+					ProblemID:   0,
+					JudgedAt:    time.Now(),
+					Status:      res.Status,
 					DetailJSON:  string(detail),
 				})
 			}
@@ -167,7 +194,7 @@ func (r *Runner) RunExam(ctx context.Context, examID, onlyStudent string) ([]Can
 	return out, nil
 }
 
-func (r *Runner) judgeCandidate(ctx context.Context, c *store.Candidate, problems []store.Problem) CandidateResult {
+func (r *Runner) judgeCandidate(ctx context.Context, c *store.Candidate, problems []store.Problem, runDir string) CandidateResult {
 	res := CandidateResult{StudentNo: c.StudentNo, Name: c.Name, Track: c.Track, Status: "ok"}
 
 	repoRec, err := r.st.GetRepoByCandidate(c.ID)
@@ -176,13 +203,13 @@ func (r *Runner) judgeCandidate(ctx context.Context, c *store.Candidate, problem
 		res.Error = "没有仓库记录"
 		return res
 	}
-	if err := os.MkdirAll(r.opts.WorkDir, 0o755); err != nil {
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		res.Status = "error"
 		res.Error = err.Error()
 		return res
 	}
 
-	dir := filepath.Join(r.opts.WorkDir, "repos", sanitize(c.StudentNo))
+	dir := filepath.Join(runDir, sanitize(c.StudentNo))
 	_ = os.RemoveAll(dir)
 	defer os.RemoveAll(dir)
 
@@ -276,22 +303,28 @@ func (r *Runner) judgeProblem(ctx context.Context, srcDir string, p store.Proble
 	}
 
 	res.Total = len(cases)
+	outputLimited := false
 	for _, c := range cases {
 		score := c.Score
 		if score <= 0 {
 			score = 1
 		}
-		cr := r.runCase(ctx, outDir, binary, c, timeout)
+		cr := r.runCase(ctx, outDir, binary, c, timeout, p.MemoryLimitMB)
 		res.Cases = append(res.Cases, cr)
 		if cr.Status == "pass" {
 			res.Passed++
 			res.Score += score
+		}
+		if cr.Status == "output_limit" {
+			outputLimited = true
 		}
 	}
 
 	switch {
 	case res.Passed == res.Total:
 		res.Status = "accepted"
+	case outputLimited:
+		res.Status = "output_limit"
 	case res.Passed == 0:
 		res.Status = "failed"
 	default:
@@ -314,10 +347,12 @@ func (r *Runner) compile(ctx context.Context, srcDir, outDir, pkg, binary string
 		args := []string{
 			"run", "--rm", "--name", name,
 			"--network", "none", "--memory", "1g", "--cpus", "1",
-			"-v", filepath.ToSlash(srcDir) + ":/src:ro",
-			"-v", filepath.ToSlash(outDir) + ":/out",
-			"-v", filepath.ToSlash(cacheDir) + ":/tmp/gocache",
-			"-v", filepath.ToSlash(goPathDir) + ":/tmp/gopath",
+			"--pids-limit", "64", "--cap-drop", "ALL",
+			"--security-opt", "no-new-privileges",
+			"-v", filepath.ToSlash(r.hostPath(srcDir)) + ":/src:ro",
+			"-v", filepath.ToSlash(r.hostPath(outDir)) + ":/out",
+			"-v", filepath.ToSlash(r.hostPath(cacheDir)) + ":/tmp/gocache",
+			"-v", filepath.ToSlash(r.hostPath(goPathDir)) + ":/tmp/gopath",
 			"-e", "GOCACHE=/tmp/gocache",
 			"-e", "GOPATH=/tmp/gopath",
 			"-e", "GOPROXY=off",
@@ -347,8 +382,11 @@ func (r *Runner) compile(ctx context.Context, srcDir, outDir, pkg, binary string
 	return string(out.stdout) + string(out.stderr), nil
 }
 
-func (r *Runner) runCase(ctx context.Context, outDir, binary string, c store.TestCase, timeout time.Duration) CaseResult {
+func (r *Runner) runCase(ctx context.Context, outDir, binary string, c store.TestCase, timeout time.Duration, memoryMB int) CaseResult {
 	cr := CaseResult{CaseNo: c.CaseNo}
+	if memoryMB <= 0 {
+		memoryMB = r.opts.MemoryMB
+	}
 	input, err := os.ReadFile(r.dataPath(c.InputPath))
 	if err != nil {
 		cr.Status = "error"
@@ -378,10 +416,15 @@ func (r *Runner) runCase(ctx context.Context, outDir, binary string, c store.Tes
 		args := []string{
 			"run", "--rm", "--name", name,
 			"--network", "none",
-			"--memory", fmt.Sprintf("%dm", r.opts.MemoryMB),
+			"--memory", fmt.Sprintf("%dm", memoryMB),
 			"--cpus", "1",
+			"--pids-limit", "64",
+			"--cap-drop", "ALL",
+			"--security-opt", "no-new-privileges",
+			"--read-only",
+			"--tmpfs", "/tmp:rw,size=64m",
 			"-i",
-			"-v", filepath.ToSlash(outDir) + ":/out:ro",
+			"-v", filepath.ToSlash(r.hostPath(outDir)) + ":/out:ro",
 			r.opts.Image,
 		}
 		args = append(args, "/out/"+binary)
@@ -396,6 +439,9 @@ func (r *Runner) runCase(ctx context.Context, outDir, binary string, c store.Tes
 	cr.TimeMS = time.Since(start).Milliseconds()
 
 	switch {
+	case out.limitExceeded:
+		cr.Status = "output_limit"
+		cr.Detail = "输出超过 1MB，已终止"
 	case out.timedOut:
 		cr.Status = "timeout"
 	case out.err != nil:
@@ -415,6 +461,23 @@ func (r *Runner) dataPath(p string) string {
 		return p
 	}
 	return filepath.Join(r.opts.DataDir, p)
+}
+
+// hostPath 把容器内路径映射回宿主机路径，供 docker -v 使用。
+func (r *Runner) hostPath(p string) string {
+	if r.opts.HostWorkDir == "" {
+		return p
+	}
+	rel, err := filepath.Rel(r.opts.WorkDir, p)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return p
+	}
+	return filepath.Join(r.opts.HostWorkDir, rel)
+}
+
+func inContainer() bool {
+	_, err := os.Stat("/.dockerenv")
+	return err == nil
 }
 
 // packageDir 返回题目包路径：优先 problems/<key>，否则仓库根目录。
@@ -443,10 +506,50 @@ func hasGoFile(dir string) bool {
 }
 
 type runOutput struct {
-	stdout   []byte
-	stderr   []byte
-	err      error
-	timedOut bool
+	stdout        []byte
+	stderr        []byte
+	err           error
+	timedOut      bool
+	limitExceeded bool
+}
+
+const maxOutputBytes = 1 << 20
+
+// cappedBuffer 限制子进程输出；超过上限时主动取消进程，避免打爆 examd 内存。
+type cappedBuffer struct {
+	mu       sync.Mutex
+	buf      bytes.Buffer
+	limit    int64
+	exceeded bool
+	cancel   context.CancelFunc
+}
+
+func (c *cappedBuffer) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	remain := c.limit - int64(c.buf.Len())
+	if remain <= 0 {
+		c.exceeded = true
+		if c.cancel != nil {
+			c.cancel()
+		}
+		return len(p), nil
+	}
+	if int64(len(p)) > remain {
+		c.buf.Write(p[:remain])
+		c.exceeded = true
+		if c.cancel != nil {
+			c.cancel()
+		}
+		return len(p), nil
+	}
+	return c.buf.Write(p)
+}
+
+func (c *cappedBuffer) Bytes() []byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.buf.Bytes()
 }
 
 func runCommand(parent context.Context, name string, args []string, stdin []byte, dir string, env []string, timeout time.Duration) runOutput {
@@ -463,12 +566,18 @@ func runCommand(parent context.Context, name string, args []string, stdin []byte
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdout := &cappedBuffer{limit: maxOutputBytes, cancel: cancel}
+	stderr := &cappedBuffer{limit: maxOutputBytes, cancel: cancel}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 
 	err := cmd.Run()
-	out := runOutput{stdout: stdout.Bytes(), stderr: stderr.Bytes(), err: err}
+	out := runOutput{
+		stdout:        stdout.Bytes(),
+		stderr:        stderr.Bytes(),
+		err:           err,
+		limitExceeded: stdout.exceeded || stderr.exceeded,
+	}
 	if ctx.Err() == context.DeadlineExceeded {
 		out.timedOut = true
 		out.err = context.DeadlineExceeded

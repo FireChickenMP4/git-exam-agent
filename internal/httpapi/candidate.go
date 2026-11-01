@@ -3,6 +3,7 @@ package httpapi
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -118,6 +119,10 @@ func (s *Server) handleProblems(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "未登录")
 		return
 	}
+	if !s.problemsVisible(e) {
+		writeError(w, http.StatusForbidden, "考试尚未开始，题面不可见")
+		return
+	}
 	problems, err := s.st.ListProblems(e.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -139,6 +144,10 @@ func (s *Server) handleProblem(w http.ResponseWriter, r *http.Request) {
 	c, e, err := s.currentCandidate(r)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "未登录")
+		return
+	}
+	if !s.problemsVisible(e) {
+		writeError(w, http.StatusForbidden, "考试尚未开始，题面不可见")
 		return
 	}
 	p, err := s.st.ProblemByKey(e.ID, r.PathValue("key"))
@@ -184,6 +193,17 @@ func (s *Server) handleProblem(w http.ResponseWriter, r *http.Request) {
 		"statement_html": html,
 		"samples":        samples,
 	})
+}
+
+func (s *Server) problemsVisible(exam *store.Exam) bool {
+	if exam.Status == "draft" {
+		return false
+	}
+	if exam.StartsAt.IsZero() {
+		return true
+	}
+	visibleAt := exam.StartsAt.Add(-time.Duration(s.cfg.Exam.ProblemVisibleBeforeMin) * time.Minute)
+	return !time.Now().Before(visibleAt)
 }
 
 func (s *Server) dataPath(p string) string {
@@ -345,15 +365,31 @@ func (s *Server) handleAgentEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "学号或令牌错误")
 		return
 	}
+	if !s.eventLimit.Allow(fmt.Sprintf("events:%d", candidate.ID)) {
+		writeError(w, http.StatusTooManyRequests, "事件上报过于频繁")
+		return
+	}
 
+	allowed := map[string]bool{
+		"start": true, "stop": true, "network_change": true,
+		"push_fail": true, "push_recover": true, "push_recover_fail": true,
+		"checkpoint": true, "bulk_edit": true, "heartbeat": true,
+	}
+	now := time.Now()
 	stored := 0
 	for _, ev := range req.Events {
-		if ev.Type == "" {
+		if !allowed[ev.Type] {
 			continue
 		}
-		when := time.Now()
+		when := now
 		if ev.T != "" {
 			if parsed, err := time.Parse(time.RFC3339, ev.T); err == nil {
+				if parsed.After(now.Add(time.Minute)) {
+					parsed = now
+				}
+				if parsed.Before(now.Add(-time.Hour)) {
+					parsed = now.Add(-time.Hour)
+				}
 				when = parsed
 			}
 		}

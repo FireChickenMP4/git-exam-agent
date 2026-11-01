@@ -13,7 +13,17 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 )
+
+func gitRun(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
 
 // ensureGit 把 git 的 bin 目录加进 PATH：go-git 的本地路径传输依赖 git-receive-pack。
 // 真实考场走 HTTP(S)，不需要本机 git。
@@ -162,6 +172,122 @@ func TestRunOnceCheckpoint(t *testing.T) {
 	// 第二次没有改动也应成功（推送 already up to date）
 	if err := RunOnce(context.Background(), cfg, &out); err != nil {
 		t.Fatalf("第二次 RunOnce: %v", err)
+	}
+}
+
+func TestInitWorkspace(t *testing.T) {
+	ensureGit(t)
+	root := t.TempDir()
+
+	// 非空目录应拒绝
+	nonEmpty := filepath.Join(root, "nonempty")
+	if err := os.MkdirAll(nonEmpty, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, nonEmpty, "x.txt", "x")
+	cfg := &Config{Repo: filepath.Join(root, "remote.git"), Username: "u", Token: "t", Workspace: nonEmpty, dir: root}
+	cfg.applyDefaults()
+	if err := InitWorkspace(context.Background(), cfg, &bytes.Buffer{}); err == nil {
+		t.Fatal("非空工作区应报错")
+	}
+
+	// 从已有提交的本地仓库 clone
+	src := filepath.Join(root, "src")
+	if _, err := git.PlainInitWithOptions(src, &git.PlainInitOptions{
+		InitOptions: git.InitOptions{DefaultBranch: plumbing.NewBranchReferenceName("main")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, src, "main.go", "package main\n")
+	seedRepo, err := git.PlainOpen(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt, err := seedRepo.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Add("main.go"); err != nil {
+		t.Fatal(err)
+	}
+	sig := &object.Signature{Name: "t", Email: "t@example.com", When: time.Now()}
+	if _, err := wt.Commit("seed", &git.CommitOptions{Author: sig, Committer: sig}); err != nil {
+		t.Fatal(err)
+	}
+
+	dst := filepath.Join(root, "dst")
+	cloneCfg := &Config{Repo: src, Username: "u", Token: "t", Workspace: dst, dir: root}
+	cloneCfg.applyDefaults()
+	if err := InitWorkspace(context.Background(), cloneCfg, &bytes.Buffer{}); err != nil {
+		t.Fatalf("InitWorkspace clone: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "main.go")); err != nil {
+		t.Fatalf("clone 后缺少文件: %v", err)
+	}
+
+	// 已初始化的目录不应重复 clone
+	if err := InitWorkspace(context.Background(), cloneCfg, &bytes.Buffer{}); err == nil {
+		t.Fatal("已有 .git 应报错")
+	}
+}
+
+func TestRecoverDiverged(t *testing.T) {
+	ensureGit(t)
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+
+	// 远端先有一个模板提交
+	seed := filepath.Join(root, "seed")
+	os.MkdirAll(seed, 0o755)
+	gitRun(t, seed, "init", "-b", "main")
+	writeFile(t, seed, "template.go", "package main\n")
+	gitRun(t, seed, "-c", "user.name=t", "-c", "user.email=t@example.com", "add", ".")
+	gitRun(t, seed, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-m", "template")
+	gitRun(t, root, "init", "--bare", "-b", "main", remote)
+	gitRun(t, seed, "remote", "add", "origin", remote)
+	gitRun(t, seed, "push", "-q", "origin", "main")
+
+	work := filepath.Join(root, "work")
+	os.MkdirAll(work, 0o755)
+	cfg := &Config{Repo: remote, Username: "20231234", Token: "t", Workspace: work, dir: root}
+	cfg.applyDefaults()
+	a, err := newAgent(cfg, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, work, "candidate.go", "package main\n\n// candidate\n")
+	res, err := a.commitAll(autoCommitMessage, time.Now(), false)
+	if err != nil || res.SHA == "" {
+		t.Fatal(err)
+	}
+	if err := a.pushRemote(); !isNonFastForward(err) {
+		t.Fatalf("期望 non-fast-forward，实际 %v", err)
+	}
+	a.commitSHA = res.SHA
+	a.tryPush(time.Now())
+
+	// 远端 main 应包含 candidate.go
+	r, err := git.PlainOpen(remote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := r.Reference(plumbing.NewBranchReferenceName("main"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit, err := r.CommitObject(ref.Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tree.File("candidate.go"); err != nil {
+		t.Fatal("恢复后远端缺少 candidate.go")
+	}
+	if a.fails != 0 {
+		t.Fatalf("恢复后 fails=%d", a.fails)
 	}
 }
 

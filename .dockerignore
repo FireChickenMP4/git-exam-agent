@@ -1,0 +1,12 @@
+.git
+.gitignore
+bin/
+dist/
+data/
+deploy/.env
+deploy/config.yaml
+deploy/signing/certs/
+deploy/gitea/custom/conf/
+*.pfx
+*.cer
+pr-notes/

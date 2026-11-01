@@ -201,6 +201,38 @@ func TestPushEventUpsert(t *testing.T) {
 	}
 }
 
+func TestJudgeLock(t *testing.T) {
+	st := newTestStore(t)
+	ok, err := st.AcquireJudgeLock("judge:e1", "run-a", time.Hour)
+	if err != nil || !ok {
+		t.Fatalf("首次加锁失败: %v %v", ok, err)
+	}
+	ok, err = st.AcquireJudgeLock("judge:e1", "run-b", time.Hour)
+	if err != nil || ok {
+		t.Fatalf("并发加锁应失败: %v %v", ok, err)
+	}
+	if err := st.ReleaseJudgeLock("judge:e1", "run-a"); err != nil {
+		t.Fatal(err)
+	}
+	ok, err = st.AcquireJudgeLock("judge:e1", "run-b", time.Hour)
+	if err != nil || !ok {
+		t.Fatalf("释放后加锁失败: %v %v", ok, err)
+	}
+
+	// 过期锁可以被抢占
+	if _, err := st.AcquireJudgeLock("judge:e2", "old", time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	ok, err = st.AcquireJudgeLock("judge:e2", "new", time.Millisecond)
+	if err != nil || !ok {
+		t.Fatalf("过期锁应可抢占: %v %v", ok, err)
+	}
+	if err := st.ReleaseJudgeLock("judge:e2", "old"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAgentEvents(t *testing.T) {
 	st := newTestStore(t)
 	seedExam(t, st)

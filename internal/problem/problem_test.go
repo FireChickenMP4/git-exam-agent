@@ -88,6 +88,19 @@ func TestImport(t *testing.T) {
 	if sampleCount != 1 {
 		t.Fatalf("样例数 = %d", sampleCount)
 	}
+
+	// 重新导入应保留 problem id，避免旧判题结果错位
+	firstID := p.ID
+	if _, err := Import(st, dataDir, "exam", root); err != nil {
+		t.Fatalf("重复导入失败: %v", err)
+	}
+	again, err := st.ListProblems("exam")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again) != 1 || again[0].ID != firstID {
+		t.Fatalf("重复导入后 problem id 变化: %d -> %d", firstID, again[0].ID)
+	}
 }
 
 func TestImportRejectsMissingExpectedOutput(t *testing.T) {

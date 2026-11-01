@@ -21,9 +21,14 @@ examd 在 compose 内运行时，`gitea.url` 仍填宿主 IP（例如 `http://10
 ```bash
 cp deploy/.env.example deploy/.env            # 改口令
 cp deploy/config-example.yaml deploy/config.yaml
+mkdir -p /srv/exam/data                        # 与 .env 的 EXAM_DATA_DIR 一致
 docker compose -f deploy/docker-compose.example.yml up -d --build
 bash deploy/gitea/init.sh                       # 创建管理员并打印 GITEA_ADMIN_TOKEN
 ```
+
+> examd 在容器里判题时，`judge.host_work_dir` 必须是容器内 `work_dir` 对应的宿主机路径
+> （`.env` 里的 `EXAM_HOST_WORK_DIR`，默认 `/srv/exam/data/judge`）。没配会在启动判题时直接报错，
+> 避免 Docker 在宿主上静默建空目录导致全员编译失败。
 
 > examd 镜像构建默认使用 `GOPROXY=https://goproxy.cn,direct`；海外构建机可加
 > `--build-arg GOPROXY=https://proxy.golang.org,direct`。
@@ -46,11 +51,15 @@ docker compose -f deploy/docker-compose.example.yml up -d examd
 
 ```bash
 make dist
-bash deploy/gitea/install-hooks.sh bin/exam-hook-linux-amd64
+bash deploy/gitea/install-hooks.sh dist/exam-hook-linux-amd64
 ```
 
 脚本会同时安装 `pre-receive`（拦截）和 `post-receive`（上报推送文件数与增删行）；两者共用同一个
 `exam-hook` 二进制。push_event 按 commit 去重，webhook 与 post-receive 任意先后到达都不会重复。
+
+compose 里 Gitea 的 custom 目录挂到 `/data/gitea/custom`，并设置 `GITEA_CUSTOM=/data/gitea/custom`；
+手工部署时请保证 `GITEA_CUSTOM` 与钩子安装路径一致。Gitea 重建仓库或从备份恢复后，需要重跑一次
+`install-hooks.sh`。
 
 判题镜像：
 
@@ -97,6 +106,8 @@ $BIN token -config $CFG -exam 2027-spring -student 20231234
 
 - 考生页：`http://10.0.0.10:8080/`
 - 管理页：`http://10.0.0.10:8080/admin`
+- 题面可见性：`draft` 或未到 `starts_at` 时接口返回 403；`exam.problem_visible_before_minutes`
+  可提前 N 分钟开放（默认 0）。
 - 看板每 5 秒刷新：最后推送超过 2 分钟标黄，超过 3 分钟标红。
 - 公告在管理页发布，考生页一分钟内刷新。
 - 每 30 分钟备份一次（管理页“备份”或 `examd backup`）。
@@ -164,7 +175,7 @@ $BIN restore -config $CFG -in backup.tar.gz -force
 | V-04 | 题面隔离 | 考生只拿到 `variant` 对应的题面 |
 | V-05 | 水印 | 考生页全屏水印（学号+姓名+时间） |
 | V-06 | agent 提交 | 改一行后 3 秒 commit、30 秒内 push |
-| V-07 | 心跳 | 无改动时每 10-25 秒空提交 |
+| V-07 | 心跳 | 无改动时每 55-65 秒空提交 |
 | V-08 | 断档告警 | 停 agent 2 分钟看板标黄，3 分钟标红 |
 | V-09 | 冻结 | 到点后 push 返回“考试已结束” |
 | V-10 | force-push | Gitea 分支保护 + 钩子双重拒绝 |

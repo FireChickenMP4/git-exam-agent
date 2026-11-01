@@ -8,4 +8,5 @@ data/
 .exam-agent.log
 deploy/signing/certs/
 *.pfx
+deploy/gitea/custom/conf/
 .DS_Store

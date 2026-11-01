@@ -194,18 +194,20 @@ func (a *Agent) step() {
 	now := time.Now()
 
 	if a.debounceElapsed(now) {
-		a.mu.Lock()
-		a.dirty = false
-		a.mu.Unlock()
-
 		res, err := a.commitAll(autoCommitMessage, now, false)
 		switch {
 		case err != nil:
-			a.logf("commit failed: %v", err)
+			a.logf("commit failed, will retry: %v", err)
+			a.mu.Lock()
+			a.lastChange = now // 保留 dirty，等下一次防抖窗口重试
+			a.mu.Unlock()
 		case res.SHA != "":
+			a.clearDirty()
 			a.lastCommit, a.commitSHA = now, res.SHA
 			a.logf("committed %s files=%d", shortSHA(res.SHA), len(res.Staged))
 			a.schedulePush(now)
+		default:
+			a.clearDirty()
 		}
 		a.reportSkipped(res.Skipped)
 	}
@@ -248,6 +250,12 @@ func (a *Agent) hasDirty() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.dirty
+}
+
+func (a *Agent) clearDirty() {
+	a.mu.Lock()
+	a.dirty = false
+	a.mu.Unlock()
 }
 
 // heartbeat 在没有真实改动时提交一个空 commit，证明 agent 还活着（V-07）。
@@ -295,6 +303,27 @@ func (a *Agent) schedulePush(now time.Time) {
 
 func (a *Agent) tryPush(now time.Time) {
 	if err := a.pushRemote(); err != nil {
+		if isNonFastForward(err) {
+			a.logf("push rejected (history diverged), trying recovery")
+			backup, recErr := a.recoverDiverged(now)
+			if recErr == nil {
+				a.fails = 0
+				a.pushPending = false
+				a.lastPush = now
+				a.logf("recovered onto remote main, local backup branch %s", backup)
+				a.events.Write("push_recover", map[string]any{
+					"backup_branch": backup,
+					"commit":        a.commitSHA,
+				})
+				return
+			}
+			a.logf("recovery failed: %v", recErr)
+			a.events.Write("push_recover_fail", map[string]any{
+				"backup_branch": backup,
+				"error":         recErr.Error(),
+			})
+			err = fmt.Errorf("%w; 自动恢复失败: %v", err, recErr)
+		}
 		a.fails++
 		delay := backoffDelay(a.fails)
 		a.nextPush = now.Add(delay)

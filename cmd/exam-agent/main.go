@@ -18,6 +18,7 @@ var version = "dev"
 func main() {
 	var (
 		configPath  = flag.String("config", ".exam-agent.json", "配置文件路径")
+		initRepo    = flag.Bool("init", false, "首次把远端仓库拉到 workspace（不需要本机 git）")
 		once        = flag.Bool("once", false, "只提交并推送一次（检查点模式）")
 		showVersion = flag.Bool("version", false, "打印版本")
 	)
@@ -38,6 +39,13 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	if *initRepo {
+		if err := agent.InitWorkspace(ctx, cfg, os.Stdout); err != nil {
+			log.Fatalf("初始化失败: %v", err)
+		}
+		return
+	}
 
 	if *once {
 		if err := agent.RunOnce(ctx, cfg, os.Stdout); err != nil {

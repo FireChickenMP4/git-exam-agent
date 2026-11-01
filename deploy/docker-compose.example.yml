@@ -27,9 +27,10 @@ services:
       - GITEA__webhook__ALLOWED_HOST_LIST=*
       - EXAM_HOOK_URL=http://examd:8080
       - EXAM_HOOK_TOKEN=${EXAM_HOOK_TOKEN}
+      - GITEA_CUSTOM=/data/gitea/custom
     volumes:
       - gitea-data:/data
-      - ./gitea/custom:/data/gitea
+      - ./gitea/custom:/data/gitea/custom
     ports:
       - "3000:3000"
     restart: unless-stopped
@@ -46,9 +47,10 @@ services:
       - EXAM_WEBHOOK_SECRET=${EXAM_WEBHOOK_SECRET}
       - EXAM_HOOK_TOKEN=${EXAM_HOOK_TOKEN}
       - EXAM_WEBHOOK_URL=${EXAM_WEBHOOK_URL:-http://examd:8080/api/hooks/gitea}
+      - EXAM_HOST_WORK_DIR=${EXAM_HOST_WORK_DIR:-/srv/exam/data/judge}
       - TZ=Asia/Shanghai
     volumes:
-      - ../data:/app/data
+      - ${EXAM_DATA_DIR:-/srv/exam/data}:/app/data
       - ./config.yaml:/app/config.yaml:ro
       - /var/run/docker.sock:/var/run/docker.sock
     ports:

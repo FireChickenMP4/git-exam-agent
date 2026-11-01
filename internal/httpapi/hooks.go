@@ -67,6 +67,10 @@ func (s *Server) handleGiteaWebhook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "解析 payload 失败")
 		return
 	}
+	if payload.Ref != "refs/heads/main" || gateZero(payload.After) {
+		writeJSON(w, http.StatusOK, map[string]bool{"ignored": true})
+		return
+	}
 	owner, repoName := splitFullName(payload.Repository.FullName)
 	if owner == "" {
 		writeJSON(w, http.StatusOK, map[string]bool{"ignored": true})
@@ -79,9 +83,6 @@ func (s *Server) handleGiteaWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sha := payload.After
-	if gateZero(sha) && len(payload.Commits) > 0 {
-		sha = payload.Commits[len(payload.Commits)-1].ID
-	}
 	files := map[string]struct{}{}
 	for _, c := range payload.Commits {
 		for _, p := range c.Added {
@@ -145,12 +146,14 @@ type preReceiveRequest struct {
 }
 
 func (s *Server) handlePreReceive(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Gitea.HookToken != "" {
-		got := r.Header.Get("X-Exam-Hook-Token")
-		if subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.Gitea.HookToken)) != 1 {
-			writeJSON(w, http.StatusOK, map[string]any{"allow": false, "reason": "钩子令牌无效"})
-			return
-		}
+	if s.cfg.Gitea.HookToken == "" {
+		writeError(w, http.StatusServiceUnavailable, "hook_token 未配置")
+		return
+	}
+	got := r.Header.Get("X-Exam-Hook-Token")
+	if subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.Gitea.HookToken)) != 1 {
+		writeJSON(w, http.StatusOK, map[string]any{"allow": false, "reason": "钩子令牌无效"})
+		return
 	}
 
 	var req preReceiveRequest
@@ -192,12 +195,14 @@ func (s *Server) handlePreReceive(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePostReceive(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Gitea.HookToken != "" {
-		got := r.Header.Get("X-Exam-Hook-Token")
-		if subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.Gitea.HookToken)) != 1 {
-			writeError(w, http.StatusUnauthorized, "钩子令牌无效")
-			return
-		}
+	if s.cfg.Gitea.HookToken == "" {
+		writeError(w, http.StatusServiceUnavailable, "hook_token 未配置")
+		return
+	}
+	got := r.Header.Get("X-Exam-Hook-Token")
+	if subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.Gitea.HookToken)) != 1 {
+		writeError(w, http.StatusUnauthorized, "钩子令牌无效")
+		return
 	}
 	var req preReceiveRequest
 	if err := readJSON(r, &req); err != nil {

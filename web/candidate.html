@@ -76,7 +76,7 @@
 <div id="blur-overlay" class="hidden">已离开考试页面，请立即返回</div>
 
 <section id="login" class="wrap">
-  <h1>2027 春季招新机试</h1>
+  <h1>Go 机试</h1>
   <form id="login-form" autocomplete="off">
     <label>学号<input id="student-no" required></label>
     <label>考试令牌<input id="token" type="password" required></label>
@@ -145,9 +145,12 @@
     var box = el("watermark");
     if (!state.me) { box.innerHTML = ""; return; }
     var stamp = state.me.student_no + " " + state.me.name + " " + new Date().toLocaleString();
-    var html = "";
-    for (var i = 0; i < 60; i++) { html += "<span>" + stamp + "</span>"; }
-    box.innerHTML = html;
+    box.innerHTML = "";
+    for (var i = 0; i < 60; i++) {
+      var span = document.createElement("span");
+      span.textContent = stamp;
+      box.appendChild(span);
+    }
   }
 
   function startTimer(seconds) {

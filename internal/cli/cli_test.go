@@ -18,6 +18,7 @@ db: "data/examd.db"
 data_dir: "data"
 judge:
   runtime: local
+  allow_local: true
 `
 	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
@@ -104,6 +105,7 @@ db: "data/examd.db"
 data_dir: "data"
 judge:
   runtime: local
+  allow_local: true
 `
 	if err := os.WriteFile(restoreCfg, []byte(restoreYAML), 0o644); err != nil {
 		t.Fatal(err)

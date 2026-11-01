@@ -217,6 +217,12 @@ CREATE TABLE IF NOT EXISTS judge_result (
 	detail_json TEXT NOT NULL DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS judge_lock (
+	scope TEXT PRIMARY KEY,
+	run_id TEXT NOT NULL,
+	started_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS notice (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	exam_id TEXT NOT NULL REFERENCES exam(id) ON DELETE CASCADE,
@@ -361,7 +367,7 @@ func (s *Store) SetExamTimes(id string, starts, ends time.Time) error {
 	return err
 }
 
-// UpsertProblem 按 (exam,key) 覆盖写入题目，连带替换其变体和用例。
+// UpsertProblem 按 (exam,key) 覆盖写入题目，保留 problem id，避免旧判题结果错位。
 func (s *Store) UpsertProblem(p *Problem) (int64, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -369,22 +375,37 @@ func (s *Store) UpsertProblem(p *Problem) (int64, error) {
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(`DELETE FROM problem WHERE exam_id=? AND key=?`, p.ExamID, p.Key); err != nil {
+	var id int64
+	err = tx.QueryRow(`SELECT id FROM problem WHERE exam_id=? AND key=?`, p.ExamID, p.Key).Scan(&id)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		if p.CreatedAt.IsZero() {
+			p.CreatedAt = time.Now()
+		}
+		res, err := tx.Exec(`INSERT INTO problem (exam_id,key,title,statement_md,score,time_limit_ms,memory_limit_mb,created_at)
+			VALUES (?,?,?,?,?,?,?,?)`,
+			p.ExamID, p.Key, p.Title, p.StatementMD, p.Score, p.TimeLimitMS, p.MemoryLimitMB, toMS(p.CreatedAt))
+		if err != nil {
+			return 0, err
+		}
+		if id, err = res.LastInsertId(); err != nil {
+			return 0, err
+		}
+	case err != nil:
 		return 0, err
+	default:
+		if _, err := tx.Exec(`UPDATE problem SET title=?,statement_md=?,score=?,time_limit_ms=?,memory_limit_mb=? WHERE id=?`,
+			p.Title, p.StatementMD, p.Score, p.TimeLimitMS, p.MemoryLimitMB, id); err != nil {
+			return 0, err
+		}
+		if _, err := tx.Exec(`DELETE FROM variant WHERE problem_id=?`, id); err != nil {
+			return 0, err
+		}
+		if _, err := tx.Exec(`DELETE FROM test_case WHERE problem_id=?`, id); err != nil {
+			return 0, err
+		}
 	}
-	if p.CreatedAt.IsZero() {
-		p.CreatedAt = time.Now()
-	}
-	res, err := tx.Exec(`INSERT INTO problem (exam_id,key,title,statement_md,score,time_limit_ms,memory_limit_mb,created_at)
-		VALUES (?,?,?,?,?,?,?,?)`,
-		p.ExamID, p.Key, p.Title, p.StatementMD, p.Score, p.TimeLimitMS, p.MemoryLimitMB, toMS(p.CreatedAt))
-	if err != nil {
-		return 0, err
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return 0, err
-	}
+
 	for _, v := range p.Variants {
 		if _, err := tx.Exec(`INSERT INTO variant (problem_id,seed,statement_md,assets_dir) VALUES (?,?,?,?)`,
 			id, v.Seed, v.StatementMD, v.AssetsDir); err != nil {

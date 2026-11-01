@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -30,7 +31,7 @@ gitea:
 	if cfg.PublicURL != "http://10.0.0.10:8080" || cfg.Gitea.AdminPassword != "secret" {
 		t.Fatalf("环境变量展开失败: %+v", cfg)
 	}
-	if cfg.Listen != ":8080" || cfg.Judge.Runtime != "local" || cfg.Exam.FreezeGraceSeconds != 30 {
+	if cfg.Listen != ":8080" || cfg.Judge.Runtime != "docker" || cfg.Exam.FreezeGraceSeconds != 30 {
 		t.Fatalf("默认值未生效: %+v", cfg)
 	}
 	if cfg.DBPath() != filepath.Join(dir, "db", "examd.db") {
@@ -57,6 +58,7 @@ gitea:
   hook_token: "b"
 judge:
   runtime: local
+  allow_local: true
 `
 	if err := os.WriteFile(path, []byte(base), 0o644); err != nil {
 		t.Fatal(err)
@@ -80,5 +82,13 @@ judge:
 	}
 	if _, err := Load(path); err == nil {
 		t.Fatal("错误 runtime 应被拒绝")
+	}
+
+	noAllow := strings.Replace(base, "  allow_local: true\n", "", 1)
+	if err := os.WriteFile(path, []byte(noAllow), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("runtime=local 未开启 allow_local 应被拒绝")
 	}
 }

@@ -45,7 +45,7 @@ foreach ($file in $Files) {
         Certificate = $cert
         HashAlgorithm = "SHA256"
     }
-    if ($Timestamp) { $args.TimestampServer = $Timestamp }
+    if ($Timestamp) { $signArgs.TimestampServer = $Timestamp }
     Set-AuthenticodeSignature @signArgs | Out-Null
 
     $check = Get-AuthenticodeSignature $file

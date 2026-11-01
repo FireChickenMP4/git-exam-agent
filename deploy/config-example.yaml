@@ -27,11 +27,15 @@ gitea:
   allow_unknown_repos: true
 
 judge:
-  # docker：用 exam-go 镜像判题；local：直接调用本机 go
+  # docker：用 exam-go 镜像判题；local：直接调用本机 go（必须同时设置 allow_local: true）
   runtime: "docker"
+  allow_local: false
   image: "exam-go:1.26"
   go_bin: "go"
   work_dir: "data/judge"
+  # examd 跑在容器里时，填容器内 work_dir 对应的宿主机绝对路径（docker -v 需要）
+  # 宿主直接运行 examd 时留空
+  host_work_dir: "${EXAM_HOST_WORK_DIR}"
   compile_timeout_seconds: 10
   run_timeout_ms: 3000
   memory_mb: 256
@@ -45,3 +49,6 @@ exam:
   # 到点自动冻结（记录 final commit、归档仓库）
   auto_freeze: true
   repo_prefix: "exam-2027-"
+  timezone: "Asia/Shanghai"
+  # 允许开考前多少分钟查看题面；0 表示必须到 starts_at 才可见
+  problem_visible_before_minutes: 0

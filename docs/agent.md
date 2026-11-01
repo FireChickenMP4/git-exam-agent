@@ -16,6 +16,16 @@
 10. 保存级采样：一次保存让白名单文件增长超过 `bulk_edit_bytes`（默认 4096 字节）时，写一条
     `bulk_edit` 事件（文件、增长字节、当前大小）；只统计字节数，不读内容、不碰剪贴板。
     该值设为负数可禁用。
+11. 历史分叉时自动恢复：推送遇到 `non-fast-forward` 时，先把本地 main 备份为
+    `agent-backup-<时间>` 分支，再重置到远端 main、重新提交工作区并推送。
+
+## 首次初始化（不需要本机 git）
+
+```bash
+exam-agent -config .exam-agent.json -init
+```
+
+它用内置的 go-git 把仓库拉到 `workspace`；之后常驻或 `-once` 都不需要安装 git。
 
 ## 只提交白名单文件
 

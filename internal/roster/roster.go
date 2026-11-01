@@ -42,7 +42,8 @@ func Parse(r io.Reader) (*Result, error) {
 	}
 	index := map[string]int{}
 	for i, h := range header {
-		index[strings.ToLower(strings.TrimSpace(h))] = i
+		h = strings.TrimPrefix(strings.TrimSpace(h), "\ufeff")
+		index[strings.ToLower(h)] = i
 	}
 	for _, required := range []string{"student_no", "name"} {
 		if _, ok := index[required]; !ok {

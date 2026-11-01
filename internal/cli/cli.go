@@ -146,6 +146,7 @@ func judgeOptions(cfg *config.Config, gc *gitea.Client, logf func(string, ...any
 		Image:              cfg.Judge.Image,
 		GoBin:              cfg.Judge.GoBin,
 		WorkDir:            cfg.JudgeWorkDir(),
+		HostWorkDir:        cfg.JudgeHostWorkDir(),
 		DataDir:            cfg.DataDirPath(),
 		CompileTimeout:     cfg.CompileTimeout(),
 		DefaultRunTimeout:  cfg.RunTimeout(),
@@ -174,6 +175,7 @@ func cmdServe(args []string, out, errOut io.Writer) error {
 		return err
 	}
 	defer st.Close()
+	_ = st.PurgeSessions(time.Now())
 
 	logf := loggerTo(errOut)
 	gc, err := newGitea(cfg)
@@ -193,6 +195,8 @@ func cmdServe(args []string, out, errOut io.Writer) error {
 		Addr:              cfg.Listen,
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 	errCh := make(chan error, 1)
 	go func() { errCh <- httpSrv.ListenAndServe() }()
@@ -247,13 +251,30 @@ func cmdAdmin(args []string, out, errOut io.Writer) error {
 	return nil
 }
 
-func parseFlexTime(value string) (time.Time, error) {
+func validExamID(id string) bool {
+	if id == "" || len(id) > 64 {
+		return false
+	}
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func parseFlexTime(value string, loc *time.Location) (time.Time, error) {
 	if value == "" {
 		return time.Time{}, nil
 	}
+	if loc == nil {
+		loc = time.Local
+	}
 	layouts := []string{time.RFC3339, "2006-01-02T15:04", "2006-01-02 15:04", "2006-01-02"}
 	for _, layout := range layouts {
-		if t, err := time.ParseInLocation(layout, value, time.Local); err == nil {
+		if t, err := time.ParseInLocation(layout, value, loc); err == nil {
 			return t, nil
 		}
 	}
@@ -273,11 +294,22 @@ func cmdExam(args []string, out, errOut io.Writer) error {
 	if *id == "" || *title == "" {
 		return fmt.Errorf("必须提供 -id 与 -title")
 	}
-	starts, err := parseFlexTime(*startsAt)
+	if !validExamID(*id) {
+		return fmt.Errorf("场次 ID 只能包含字母、数字、下划线和短横线")
+	}
+	cfg, err := config.Load(*configPath)
 	if err != nil {
 		return err
 	}
-	ends, err := parseFlexTime(*endsAt)
+	loc, err := cfg.Location()
+	if err != nil {
+		return err
+	}
+	starts, err := parseFlexTime(*startsAt, loc)
+	if err != nil {
+		return err
+	}
+	ends, err := parseFlexTime(*endsAt, loc)
 	if err != nil {
 		return err
 	}
@@ -289,10 +321,6 @@ func cmdExam(args []string, out, errOut io.Writer) error {
 	}
 	if !ends.After(starts) {
 		return fmt.Errorf("结束时间必须晚于开始时间")
-	}
-	cfg, err := config.Load(*configPath)
-	if err != nil {
-		return err
 	}
 	st, err := openStore(cfg)
 	if err != nil {
@@ -725,7 +753,7 @@ func cmdBackup(args []string, out, errOut io.Writer) error {
 		return err
 	}
 	defer st.Close()
-	if err := backup.Create(st, cfg.DataDirPath(), *outPath); err != nil {
+	if err := backup.Create(st, cfg.DBPath(), cfg.DataDirPath(), *outPath); err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "backup written: %s\n", *outPath)

@@ -41,6 +41,7 @@ type Server struct {
 	logf       func(format string, args ...any)
 	freezeMu   sync.Mutex
 	loginLimit *limiter
+	eventLimit *limiter
 }
 
 // New 创建 HTTP 服务。
@@ -56,6 +57,7 @@ func New(cfg *config.Config, st *store.Store, gc *gitea.Client, judgeOpts judge.
 		md:         goldmark.New(),
 		logf:       logf,
 		loginLimit: newLimiter(10, time.Minute),
+		eventLimit: newLimiter(120, time.Minute),
 	}
 }
 
@@ -187,6 +189,10 @@ func adminFrom(r *http.Request) *store.Admin {
 
 func (s *Server) adminOnly(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Header.Get("X-Exam-Admin") != "1" {
+			writeError(w, http.StatusForbidden, "缺少管理端请求头")
+			return
+		}
 		cookie, err := r.Cookie(adminCookie)
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, "未登录")
@@ -263,6 +269,11 @@ func (s *Server) FreezeExam(ctx context.Context, examID, actor string) (int64, i
 	if exam.Status == "frozen" || exam.Status == "closed" {
 		return 0, 0, nil
 	}
+	// 先置 frozen，让 pre-receive 立刻开始拒绝推送，再做记录/归档；
+	// 否则读分支头到改状态之间到达的推送会被接受但不会被记录。
+	if err := s.st.SetExamStatus(examID, "frozen"); err != nil {
+		return 0, 0, err
+	}
 	candidates, err := s.st.ListCandidates(examID)
 	if err != nil {
 		return 0, 0, err
@@ -312,9 +323,6 @@ func (s *Server) FreezeExam(ctx context.Context, examID, actor string) (int64, i
 		_ = s.st.MarkRepoArchived(c.ID)
 		archived++
 	}
-	if err := s.st.SetExamStatus(examID, "frozen"); err != nil {
-		return finalized, archived, err
-	}
 	_ = s.st.AddAudit(examID, "admin", actor, "freeze", examID,
 		fmt.Sprintf("finalized=%d archived=%d", finalized, archived))
 	return finalized, archived, nil
@@ -332,7 +340,7 @@ func (s *Server) Provisioner() *provision.Provisioner {
 
 // Backupper 执行备份。
 func (s *Server) Backupper(out string) error {
-	return backup.Create(s.st, s.cfg.DataDirPath(), out)
+	return backup.Create(s.st, s.cfg.DBPath(), s.cfg.DataDirPath(), out)
 }
 
 type statusWriter struct {
@@ -355,12 +363,23 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 	})
 }
 
-func parseTime(value string) (time.Time, error) {
+func (s *Server) parseTime(value string) (time.Time, error) {
+	loc, err := s.cfg.Location()
+	if err != nil {
+		loc = time.UTC
+	}
+	return parseTimeIn(value, loc)
+}
+
+func parseTimeIn(value string, loc *time.Location) (time.Time, error) {
 	if value == "" {
 		return time.Time{}, nil
 	}
 	if t, err := time.Parse(time.RFC3339, value); err == nil {
 		return t, nil
 	}
-	return time.Parse("2006-01-02T15:04", value)
+	if loc == nil {
+		loc = time.UTC
+	}
+	return time.ParseInLocation("2006-01-02T15:04", value, loc)
 }

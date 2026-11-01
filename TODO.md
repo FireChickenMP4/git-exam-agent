@@ -31,7 +31,7 @@
 - [x] 配置读取
 - [x] `fsnotify` 监听 + 3 秒防抖
 - [x] `go-git` init/add/commit/push
-- [x] 心跳（10-25 秒随机）
+- [x] 心跳（55-65 秒随机，工作区有改动时跳过）
 - [x] 推送失败排队与指数退避
 - [x] `agent_event`：start/stop/network_change/push_fail
 - [x] 状态行输出

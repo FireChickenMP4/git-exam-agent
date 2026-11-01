@@ -219,6 +219,29 @@ func (s *Store) ListJudgeResults(examID string) ([]JudgeResult, error) {
 	return out, rows.Err()
 }
 
+// AcquireJudgeLock 抢占一次判题任务；staleAfter 之前的锁视为过期。
+func (s *Store) AcquireJudgeLock(scope, runID string, staleAfter time.Duration) (bool, error) {
+	now := time.Now()
+	res, err := s.db.Exec(`INSERT INTO judge_lock (scope,run_id,started_at) VALUES (?,?,?)
+		ON CONFLICT(scope) DO UPDATE SET run_id=excluded.run_id, started_at=excluded.started_at
+		WHERE judge_lock.started_at < ?`,
+		scope, runID, toMS(now), toMS(now.Add(-staleAfter)))
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// ReleaseJudgeLock 释放自己持有的判题锁。
+func (s *Store) ReleaseJudgeLock(scope, runID string) error {
+	_, err := s.db.Exec(`DELETE FROM judge_lock WHERE scope=? AND run_id=?`, scope, runID)
+	return err
+}
+
 // CountCandidates 返回场次考生数。
 func (s *Store) CountCandidates(examID string) (int, error) {
 	var n int

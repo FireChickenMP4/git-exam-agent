@@ -4,7 +4,7 @@
 set -euo pipefail
 
 COMPOSE_FILE=${COMPOSE_FILE:-deploy/docker-compose.example.yml}
-BIN=${1:-bin/exam-hook-linux-amd64}
+BIN=${1:-dist/exam-hook-linux-amd64}
 
 if [ ! -f "$BIN" ]; then
   echo "找不到 $BIN，先执行：make dist" >&2
@@ -31,3 +31,8 @@ done
 '
 
 echo "pre-receive / post-receive 钩子已安装到所有仓库"
+docker compose -f "$COMPOSE_FILE" exec -T gitea sh -c '
+test -x /data/gitea/custom/hooks/exam-hook &&
+test -x /data/gitea/custom/hooks/pre-receive.d/exam-hook &&
+test -x /data/gitea/custom/hooks/post-receive.d/exam-hook
+' && echo "钩子自检通过"

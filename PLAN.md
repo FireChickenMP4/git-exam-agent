@@ -156,8 +156,8 @@ exam-2027/
   "debounce_ms": 3000,
   "push_interval_ms_min": 10000,
   "push_interval_ms_max": 30000,
-  "heartbeat_ms_min": 10000,
-  "heartbeat_ms_max": 25000
+  "heartbeat_ms_min": 55000,
+  "heartbeat_ms_max": 65000
 }
 ```
 
@@ -166,7 +166,7 @@ exam-2027/
 1. 初始化仓库，首次提交
 2. 监听变化，防抖 3 秒
 3. `add` / `commit` / `push`
-4. 心跳：随机 10-25 秒，空提交或 `.heartbeat`
+4. 心跳：随机 55-65 秒创建空提交（工作区有未提交改动时跳过），复核可用 `examd review` 过滤
 5. 推送失败：本地排队，指数退避
 6. 检测网络接口/SSID 变化，写 `agent_event`
 7. 状态行：最后提交、最后推送、失败次数、当前网络
@@ -180,10 +180,10 @@ exam-2027/
 
 ### 7.4 检查点模式（降级）
 
-- 不运行 agent；仓库内提供 `push.ps1` / `push.sh`。
-- 考点在 T-60/T-40/T-20/T-5 广播；考生双击提交。
+- 不常驻 agent；改用 `exam-agent -config .exam-agent.json -once` 做一次提交+推送（不需要本机 git）。
+- 考点在 T-60/T-40/T-20/T-5 广播；考生双击快捷方式提交。
 - 看板显示最后推送；未推送标红。
-- 与 agent 二选一；默认 agent。
+- 与常驻 agent 二选一；默认常驻。
 
 ### 7.5 服务端钩子
 

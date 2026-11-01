@@ -21,6 +21,22 @@
 | K-13 | 心跳把真实改动包进 heartbeat | 改动未到防抖时间时，心跳先提交并带上这些改动；复核按消息过滤心跳后，真实改动会消失 | 心跳改为只在工作区没有未提交改动时创建纯空提交；`TestHeartbeatDoesNotSwallowChanges` 覆盖 |
 | K-14 | 推送行数一直为 0 | webhook 不带增删行；pre-receive 记录会产生幽灵提交 | 增加 post-receive 钩子上报 `git diff` 统计；push_event 按 `commit_sha` 去重，webhook 与钩子任意先后到达都只保留一条并补全行数 |
 
+## 2026-11 全量审查修复
+
+| 编号 | 问题 | 修复 |
+|---|---|---|
+| P0-1 | compose 里 examd 容器判题时 `-v` 用了容器内路径，Docker 在宿主建空目录，全员编译失败 | 新增 `judge.host_work_dir`（容器内 work_dir 对应的宿主路径），docker 挂载统一映射；examd 在容器内且未配置时直接报错 |
+| P0-2 | Gitea custom 目录/钩子路径不一致，安装脚本会中止或推送全被拒 | compose 固定 `GITEA_CUSTOM=/data/gitea/custom` 并只挂载 custom 子目录；`install-hooks.sh` 默认 `dist/` 二进制并增加自检 |
+| P1-1 | 并发判题互相删除工作目录 | SQLite `judge_lock` + 每次运行独立 `repos/<runID>/`，HTTP/CLI 共用锁 |
+| P1-2 | 学生程序无限输出打爆 examd 内存 | 子进程输出限制 1MB，超限终止并记 `output_limit`；判题容器加 pids/cap/read-only/tmpfs 限制 |
+| P1-3 | 冻结先读分支头后改状态，窗口内推送可被接受 | 进入冻结先置 `frozen`，再记录 final commit、归档 |
+| P1-4 | 判题失败保留旧成绩，报表与 CSV 不一致 | 失败也整批替换结果（`problem_id=0` 占位） |
+| P1-5 | 重导题目后 problem id 变化，旧成绩错位 | 按 `(exam_id,key)` UPDATE，保留 problem id |
+| P1-6 | 历史分叉时 agent 永久 non-fast-forward | 自动备份本地 main 到 `agent-backup-<时间>`，重置到远端 main 后重提并推送 |
+| P1-7 | 签名脚本 `$args.TimestampServer` 抛异常 | 改为 `$signArgs.TimestampServer` |
+| P1-8 | 漏配 judge 段默认 local，学生代码裸跑 | 默认 `docker`；`runtime: local` 必须显式 `judge.allow_local: true` |
+| P2 | 钩子 token 为空、webhook 非 main/零 SHA、提交失败清 dirty、长任务绑定请求 ctx、备份混入 live db、时区解析、CSV BOM、题目内存限制、构建上下文泄密、CSRF、事件时间/配额、文档偏差 | 已逐项修复：见对应代码与测试 |
+
 ## 已知边界（本轮已关闭）
 
 | 编号 | 事项 | 处理 | 验证 |

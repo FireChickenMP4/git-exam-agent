@@ -1,8 +1,12 @@
 package backup
 
 import (
+	"archive/tar"
+	"compress/gzip"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"exam.local/tools/internal/store"
@@ -31,9 +35,35 @@ func TestCreateAndRestore(t *testing.T) {
 	}
 
 	out := filepath.Join(t.TempDir(), "backup.tar.gz")
-	if err := Create(st, dataDir, out); err != nil {
+	if err := Create(st, dbPath, dataDir, out); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+
+	// 数据目录里不能包含 live db/wal/shm（快照是单独的 examd.db）
+	f, err := os.Open(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.HasPrefix(hdr.Name, "data/examd.db") {
+			t.Fatalf("备份包混入 live db: %s", hdr.Name)
+		}
+	}
+	gz.Close()
+	f.Close()
+
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}

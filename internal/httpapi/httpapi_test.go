@@ -46,6 +46,7 @@ gitea:
   hook_token: "hook-secret"
 judge:
   runtime: local
+  allow_local: true
   go_bin: go
 `
 	cfgPath := filepath.Join(dir, "config.yaml")
@@ -140,6 +141,7 @@ func doJSON(t *testing.T, client *http.Client, method, url string, body any) (in
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	req.Header.Set("X-Exam-Admin", "1")
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -308,6 +310,36 @@ func TestAdminFlowAndHooks(t *testing.T) {
 		t.Fatalf("push events = %d, %v", n, err)
 	}
 
+	// 非 main 分支的 webhook 应被忽略
+	devPayload := []byte(`{"ref":"refs/heads/dev","after":"deadbeef","commits":[{"id":"deadbeef","modified":["main.go"]}],"repository":{"full_name":"20231234/exam-2027-20231234"}}`)
+	devMac := hmac.New(sha256.New, []byte(env.cfg.Gitea.WebhookSecret))
+	devMac.Write(devPayload)
+	req, _ = http.NewRequest(http.MethodPost, env.srv.URL+"/api/hooks/gitea", bytes.NewReader(devPayload))
+	req.Header.Set("X-Gitea-Signature", hex.EncodeToString(devMac.Sum(nil)))
+	resp, err = admin.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("非 main webhook 返回 %d", resp.StatusCode)
+	}
+	if n, _ := env.st.CountPushEvents(env.candidate.ID); n != 1 {
+		t.Fatalf("非 main webhook 不应记录，count=%d", n)
+	}
+
+	// 管理端写接口缺少自定义头应 403（CSRF 防护）
+	req, _ = http.NewRequest(http.MethodPost, env.srv.URL+"/api/admin/exams/2027-spring/start", nil)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = admin.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("无 X-Exam-Admin 头应 403，实际 %d", resp.StatusCode)
+	}
+
 	// post-receive 后到：补全行数但不重复记录
 	pushStats := map[string]any{
 		"repo_path":     "/data/git/repositories/20231234/exam-2027-20231234.git",
@@ -414,6 +446,30 @@ func TestAdminRequiresSession(t *testing.T) {
 	status, _, _ = doJSON(t, client, http.MethodGet, env.srv.URL+"/api/me", nil)
 	if status != http.StatusUnauthorized {
 		t.Fatalf("未登录访问考生端返回 %d", status)
+	}
+}
+
+func TestProblemsVisible(t *testing.T) {
+	s := &Server{cfg: &config.Config{}}
+	now := time.Now()
+	cases := []struct {
+		name  string
+		exam  store.Exam
+		visit bool
+	}{
+		{"draft 未开始", store.Exam{Status: "draft", StartsAt: now.Add(-time.Hour)}, false},
+		{"running 未到时间", store.Exam{Status: "running", StartsAt: now.Add(time.Hour)}, false},
+		{"running 已到时间", store.Exam{Status: "running", StartsAt: now.Add(-time.Minute)}, true},
+		{"frozen 已开考", store.Exam{Status: "frozen", StartsAt: now.Add(-time.Hour)}, true},
+	}
+	for _, c := range cases {
+		if got := s.problemsVisible(&c.exam); got != c.visit {
+			t.Errorf("%s: visible=%v want %v", c.name, got, c.visit)
+		}
+	}
+	s.cfg.Exam.ProblemVisibleBeforeMin = 10
+	if !s.problemsVisible(&store.Exam{Status: "running", StartsAt: now.Add(5 * time.Minute)}) {
+		t.Error("配置提前 10 分钟可见时应可见")
 	}
 }
 

@@ -40,9 +40,11 @@ type Gitea struct {
 // Judge 是判题运行器配置。
 type Judge struct {
 	Runtime               string `yaml:"runtime"` // docker | local
+	AllowLocal            bool   `yaml:"allow_local"`
 	Image                 string `yaml:"image"`
 	GoBin                 string `yaml:"go_bin"`
 	WorkDir               string `yaml:"work_dir"`
+	HostWorkDir           string `yaml:"host_work_dir"`
 	CompileTimeoutSeconds int    `yaml:"compile_timeout_seconds"`
 	RunTimeoutMS          int    `yaml:"run_timeout_ms"`
 	MemoryMB              int    `yaml:"memory_mb"`
@@ -52,10 +54,12 @@ type Judge struct {
 
 // Exam 是考试行为配置。
 type Exam struct {
-	FreezeGraceSeconds int    `yaml:"freeze_grace_seconds"`
-	ConsentVersion     string `yaml:"consent_version"`
-	AutoFreeze         bool   `yaml:"auto_freeze"`
-	RepoPrefix         string `yaml:"repo_prefix"`
+	FreezeGraceSeconds      int    `yaml:"freeze_grace_seconds"`
+	ConsentVersion          string `yaml:"consent_version"`
+	AutoFreeze              bool   `yaml:"auto_freeze"`
+	RepoPrefix              string `yaml:"repo_prefix"`
+	Timezone                string `yaml:"timezone"`
+	ProblemVisibleBeforeMin int    `yaml:"problem_visible_before_minutes"`
 }
 
 func defaults() *Config {
@@ -69,7 +73,7 @@ func defaults() *Config {
 			AllowUnknownRepos: true,
 		},
 		Judge: Judge{
-			Runtime:               "local",
+			Runtime:               "docker",
 			Image:                 "exam-go:1.26",
 			GoBin:                 "go",
 			WorkDir:               "data/judge",
@@ -84,6 +88,7 @@ func defaults() *Config {
 			ConsentVersion:     "v1",
 			AutoFreeze:         true,
 			RepoPrefix:         "exam-2027-",
+			Timezone:           "Asia/Shanghai",
 		},
 	}
 }
@@ -119,12 +124,19 @@ func (c *Config) validate() error {
 		return fmt.Errorf("data_dir 不能为空")
 	case c.Judge.Runtime != "docker" && c.Judge.Runtime != "local":
 		return fmt.Errorf("judge.runtime 只能是 docker 或 local")
+	case c.Judge.Runtime == "local" && !c.Judge.AllowLocal:
+		return fmt.Errorf("judge.runtime=local 需要显式设置 judge.allow_local: true")
 	case c.Judge.CompileConcurrency < 1:
 		return fmt.Errorf("judge.compile_concurrency 至少为 1")
 	case c.Judge.RunConcurrency < 1:
 		return fmt.Errorf("judge.run_concurrency 至少为 1")
 	case c.Exam.FreezeGraceSeconds < 0:
 		return fmt.Errorf("exam.freeze_grace_seconds 不能为负")
+	}
+	if c.Exam.Timezone != "" {
+		if _, err := time.LoadLocation(c.Exam.Timezone); err != nil {
+			return fmt.Errorf("exam.timezone %q 无效: %w", c.Exam.Timezone, err)
+		}
 	}
 	return nil
 }
@@ -152,6 +164,23 @@ func (c *Config) DataDirPath() string { return c.resolve(c.DataDir) }
 
 // JudgeWorkDir 返回判题临时目录绝对路径。
 func (c *Config) JudgeWorkDir() string { return c.resolve(c.Judge.WorkDir) }
+
+// JudgeHostWorkDir 返回判题目录在宿主机上的对应路径（examd 在容器内时使用）。
+func (c *Config) JudgeHostWorkDir() string {
+	if c.Judge.HostWorkDir == "" {
+		return ""
+	}
+	return c.resolve(c.Judge.HostWorkDir)
+}
+
+// Location 返回考试时区；未配置时使用本机时区。
+func (c *Config) Location() (*time.Location, error) {
+	tz := c.Exam.Timezone
+	if tz == "" {
+		return time.Local, nil
+	}
+	return time.LoadLocation(tz)
+}
 
 // CompileTimeout 返回编译超时。
 func (c *Config) CompileTimeout() time.Duration {

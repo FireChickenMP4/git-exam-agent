@@ -49,6 +49,16 @@ func TestParseDefaults(t *testing.T) {
 	}
 }
 
+func TestParseBOMHeader(t *testing.T) {
+	res, err := Parse(strings.NewReader("\ufeffstudent_no,name\n20231234,张三\n"))
+	if err != nil {
+		t.Fatalf("BOM 表头解析失败: %v", err)
+	}
+	if len(res.Rows) != 1 || res.Rows[0].StudentNo != "20231234" {
+		t.Fatalf("BOM 名单解析错误: %+v", res)
+	}
+}
+
 func TestParseBadHeader(t *testing.T) {
 	if _, err := Parse(strings.NewReader("a,b\n1,2\n")); err == nil {
 		t.Fatal("缺表头应报错")

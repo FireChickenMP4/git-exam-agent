@@ -70,4 +70,5 @@ exam-2027-20231234/
 examd judge -config deploy/config.yaml -exam 2027-spring -out results.csv -runtime local
 ```
 
-`local` 模式直接调用本机 `go build` / 二进制，不施加内存与网络限制，仅用于开发。
+`local` 模式直接调用本机 `go build` / 二进制，不施加内存与网络限制，仅用于开发。配置文件里使用
+`judge.runtime: local` 时必须同时写 `judge.allow_local: true`；CLI 的 `-runtime local` 属于显式覆盖。
