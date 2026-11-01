@@ -19,6 +19,7 @@
 | K-11 | examd 镜像在国内网络构建失败 | `go mod download` 访问 `proxy.golang.org` 被拒（connection refused） | Dockerfile 增加 `GOPROXY` build-arg，默认 `https://goproxy.cn,direct`；实测镜像构建成功、容器内 `examd version` 正常 |
 | K-12 | 心跳空提交污染复核 | 默认 10-25 秒一个空提交，2 小时约 240-480 条，`git log` 难以阅读 | 心跳默认改为 55-65 秒（仍满足每分钟有提交）；新增 `examd review`，默认过滤心跳并输出每次增删行、`bulk_change`/`long_gap` 标记 |
 | K-13 | 心跳把真实改动包进 heartbeat | 改动未到防抖时间时，心跳先提交并带上这些改动；复核按消息过滤心跳后，真实改动会消失 | 心跳改为只在工作区没有未提交改动时创建纯空提交；`TestHeartbeatDoesNotSwallowChanges` 覆盖 |
+| K-14 | 推送行数一直为 0 | webhook 不带增删行；pre-receive 记录会产生幽灵提交 | 增加 post-receive 钩子上报 `git diff` 统计；push_event 按 `commit_sha` 去重，webhook 与钩子任意先后到达都只保留一条并补全行数 |
 
 ## 已知边界（本轮已关闭）
 

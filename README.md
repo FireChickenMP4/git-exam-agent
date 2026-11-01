@@ -102,5 +102,6 @@ agent 配置与安装见 `docs/agent.md`；题目目录格式见 `docs/problems.
   为证明走的是 Docker 而非本机 Go，压测配置把 `judge.go_bin` 故意指向不存在的路径。
 - 断网演练：停掉 Gitea 20 秒，agent 出现 `push failed` 并按 2s/4s/8s/16s 退避，
   Gitea 恢复后自动补推成功。
-- 复核：`examd review` 默认过滤心跳提交，输出每次提交的增删行与 `bulk_change` / `long_gap` 标记。
+- 推送记录：webhook + post-receive 钩子，按 commit 去重并记录文件数、增删行
+- 复核时间线：`examd review` 默认过滤心跳提交，输出每次增删行与 `bulk_change` / `long_gap` 标记；管理页可直接生成
 - `make lint`、`make build`、`make dist`（windows/darwin/linux）通过。

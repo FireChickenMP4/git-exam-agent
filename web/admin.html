@@ -99,6 +99,7 @@
       <div class="small"><button id="btn-close">封存</button></div>
       <div class="small"><button id="btn-export">导出报表</button></div>
       <div class="small"><button id="btn-judge">批量判题</button></div>
+      <div class="small"><button id="btn-review">复核时间线</button></div>
       <div class="small"><button id="btn-backup">备份</button></div>
     </div>
     <p class="muted">开通后如有令牌丢失，请用 <code>examd token -config ... -exam ... -student ...</code> 重置。</p>
@@ -296,6 +297,29 @@
   });
   el("btn-judge").addEventListener("click", function () {
     if (confirm("开始批量判题？耗时可能较长。")) { examAction("judge"); }
+  });
+  el("btn-review").addEventListener("click", function () {
+    if (!examId()) { out("请先选择场次"); return; }
+    var student = prompt("复核学号（留空表示全场）", "");
+    if (student === null) { return; }
+    out("复核生成中，请稍候...");
+    api("POST", "/api/admin/exams/" + encodeURIComponent(examId()) + "/review", {
+      student: student.trim()
+    }).then(function (data) {
+      out({
+        rows: data.rows,
+        bulk_change: data.bulk_change,
+        long_gap: data.long_gap
+      });
+      var blob = new Blob([data.csv], { type: "text/csv;charset=utf-8" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "review-" + (student.trim() || examId()) + ".csv";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+    }).catch(function (e) { out("失败：" + e.message); });
   });
   el("btn-backup").addEventListener("click", function () { examAction("backup"); });
   el("btn-notice").addEventListener("click", function () {

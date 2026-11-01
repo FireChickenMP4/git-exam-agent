@@ -93,8 +93,13 @@ func (s *Store) FinalizeExam(examID string) (int64, error) {
 	return res.RowsAffected()
 }
 
-// AddPushEvent 写入推送记录并刷新仓库最后推送时间。
+// AddPushEvent 写入或合并推送记录（同一 commit 只保留一条）。
 func (s *Store) AddPushEvent(e *PushEvent) error {
+	return s.UpsertPushEvent(e)
+}
+
+// UpsertPushEvent 按 (考生, commit_sha) 去重写入；后到的统计会补全行数。
+func (s *Store) UpsertPushEvent(e *PushEvent) error {
 	if e.Source == "" {
 		e.Source = "webhook"
 	}
@@ -104,10 +109,38 @@ func (s *Store) AddPushEvent(e *PushEvent) error {
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(`INSERT INTO push_event (candidate_id,ref,commit_sha,received_at,lines_added,lines_deleted,files_changed,source)
-		VALUES (?,?,?,?,?,?,?,?)`,
-		e.CandidateID, e.Ref, e.CommitSHA, toMS(e.ReceivedAt), e.LinesAdded, e.LinesDeleted, e.FilesChanged, e.Source); err != nil {
+	var (
+		id                       int64
+		linesAdded, linesDeleted int
+		filesChanged             int
+	)
+	err = tx.QueryRow(`SELECT id,lines_added,lines_deleted,files_changed FROM push_event
+		WHERE candidate_id=? AND commit_sha=? ORDER BY id DESC LIMIT 1`, e.CandidateID, e.CommitSHA).
+		Scan(&id, &linesAdded, &linesDeleted, &filesChanged)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		if _, err := tx.Exec(`INSERT INTO push_event (candidate_id,ref,commit_sha,received_at,lines_added,lines_deleted,files_changed,source)
+			VALUES (?,?,?,?,?,?,?,?)`,
+			e.CandidateID, e.Ref, e.CommitSHA, toMS(e.ReceivedAt), e.LinesAdded, e.LinesDeleted, e.FilesChanged, e.Source); err != nil {
+			return err
+		}
+	case err != nil:
 		return err
+	default:
+		// 统计值只增不减：webhook 先到时行数为 0，post-receive 后到补全。
+		if e.LinesAdded > linesAdded {
+			linesAdded = e.LinesAdded
+		}
+		if e.LinesDeleted > linesDeleted {
+			linesDeleted = e.LinesDeleted
+		}
+		if e.FilesChanged > filesChanged {
+			filesChanged = e.FilesChanged
+		}
+		if _, err := tx.Exec(`UPDATE push_event SET lines_added=?,lines_deleted=?,files_changed=? WHERE id=?`,
+			linesAdded, linesDeleted, filesChanged, id); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.Exec(`UPDATE repo SET last_push_at=? WHERE candidate_id=? AND last_push_at<?`,
 		toMS(e.ReceivedAt), e.CandidateID, toMS(e.ReceivedAt)); err != nil {

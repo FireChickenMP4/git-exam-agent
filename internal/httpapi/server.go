@@ -93,10 +93,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/admin/exams/{id}/live", s.adminOnly(s.handleAdminLive))
 	mux.HandleFunc("GET /api/admin/exams/{id}/export.csv", s.adminOnly(s.handleAdminExport))
 	mux.HandleFunc("POST /api/admin/exams/{id}/judge", s.adminOnly(s.handleAdminJudge))
+	mux.HandleFunc("POST /api/admin/exams/{id}/review", s.adminOnly(s.handleAdminReview))
 	mux.HandleFunc("POST /api/admin/exams/{id}/backup", s.adminOnly(s.handleAdminBackup))
 
 	mux.HandleFunc("POST /api/hooks/gitea", s.handleGiteaWebhook)
 	mux.HandleFunc("POST /api/hooks/pre-receive", s.handlePreReceive)
+	mux.HandleFunc("POST /api/hooks/push", s.handlePostReceive)
 
 	return s.logRequests(mux)
 }

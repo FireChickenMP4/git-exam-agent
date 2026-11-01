@@ -84,6 +84,21 @@ macOS 使用 LaunchAgent，Linux 使用 systemd user unit（`systemctl --user`�
 
 - 事件日志：配置文件同目录的 `.exam-agent.events.jsonl`，类型为 `start`、`stop`、`network_change`、`push_fail`。
 
+## Windows 权限与杀软
+
+- `exam-agent.exe` **不需要管理员权限**：只读写考生工作区、发 HTTP 请求、注册当前用户的登录计划任务。
+- 如果机房组策略禁止创建计划任务，改用“启动”文件夹快捷方式，或让考生手动运行
+  `exam-agent -config ... -once` 打检查点；都不需要提权。
+- 未签名的自编译 exe 有被 Defender/第三方杀软启发式误报的风险（文件监听 + 自动提交 + 计划任务
+  这类行为容易命中通用规则）。建议按优先级处理：
+  1. 用代码签名证书给 `exam-agent.exe` 做 Authenticode 签名并加时间戳；
+  2. 考前把样本提交给 Microsoft/在用杀软做误报申诉；
+  3. T-7 真机演练时逐台确认；分发用 U 盘并附 SHA256，必要时 `Unblock-File`；
+  4. 最后才考虑由管理员给考试目录加排除项，不建议让考生关闭杀软。
+- 不要在考场使用 UPX 之类加壳，会显著提高误报率。
+- macOS 未签名二进制会被 Gatekeeper 拦；需要签名/公证，或安装后
+  `xattr -d com.apple.quarantine /usr/local/bin/exam-agent`。LaunchAgent 不需要 sudo。
+
 ## 常见问题
 
 | 现象 | 处理 |

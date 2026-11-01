@@ -12,17 +12,22 @@ if [ ! -f "$BIN" ]; then
 fi
 
 cp "$BIN" deploy/gitea/custom/hooks/exam-hook
-chmod +x deploy/gitea/custom/hooks/exam-hook deploy/gitea/custom/hooks/pre-receive.d/exam-hook
+chmod +x deploy/gitea/custom/hooks/exam-hook \
+  deploy/gitea/custom/hooks/pre-receive.d/exam-hook \
+  deploy/gitea/custom/hooks/post-receive.d/exam-hook
 
 docker compose -f "$COMPOSE_FILE" exec -T gitea sh -c '
 set -e
-chmod +x /data/gitea/custom/hooks/exam-hook /data/gitea/custom/hooks/pre-receive.d/exam-hook
+chmod +x /data/gitea/custom/hooks/exam-hook \
+  /data/gitea/custom/hooks/pre-receive.d/exam-hook \
+  /data/gitea/custom/hooks/post-receive.d/exam-hook
 for repo in /data/git/repositories/*/*.git; do
   [ -d "$repo" ] || continue
-  mkdir -p "$repo/hooks/pre-receive.d"
+  mkdir -p "$repo/hooks/pre-receive.d" "$repo/hooks/post-receive.d"
   cp /data/gitea/custom/hooks/pre-receive.d/exam-hook "$repo/hooks/pre-receive.d/exam-hook"
-  chmod +x "$repo/hooks/pre-receive.d/exam-hook"
+  cp /data/gitea/custom/hooks/post-receive.d/exam-hook "$repo/hooks/post-receive.d/exam-hook"
+  chmod +x "$repo/hooks/pre-receive.d/exam-hook" "$repo/hooks/post-receive.d/exam-hook"
 done
 '
 
-echo "pre-receive 钩子已安装到所有仓库"
+echo "pre-receive / post-receive 钩子已安装到所有仓库"

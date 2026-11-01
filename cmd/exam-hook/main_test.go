@@ -122,6 +122,62 @@ func TestHookAllowsGoPush(t *testing.T) {
 	}
 }
 
+func commitMore(t *testing.T, dir, name, content string) string {
+	t.Helper()
+	repo, err := git.PlainOpen(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Add(name); err != nil {
+		t.Fatal(err)
+	}
+	sig := &object.Signature{Name: "test", Email: "t@example.com", When: time.Now()}
+	hash, err := wt.Commit("more", &git.CommitOptions{Author: sig, Committer: sig})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return hash.String()
+}
+
+func TestHookPostReceiveReportsStats(t *testing.T) {
+	bin := buildHook(t)
+	dir, old := newRepo(t, map[string]string{"main.go": "package main\n"})
+	newSHA := commitMore(t, dir, "main.go", "package main\n\nfunc a() {}\nfunc b() {}\nfunc c() {}\n")
+
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &got)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	run := runHook(t, bin, dir, old+" "+newSHA+" refs/heads/main\n",
+		"--post-receive", "--examd", srv.URL, "--token", "hook-token")
+	if run.code != 0 {
+		t.Fatalf("post-receive 应始终成功，exit=%d output=%s", run.code, run.output)
+	}
+	if got == nil {
+		t.Fatal("未上报统计")
+	}
+	if got["new_sha"] != newSHA {
+		t.Fatalf("new_sha = %v", got["new_sha"])
+	}
+	if added, _ := got["lines_added"].(float64); added < 3 {
+		t.Fatalf("lines_added = %v", got["lines_added"])
+	}
+	if files, _ := got["files_changed"].(float64); files < 1 {
+		t.Fatalf("files_changed = %v", got["files_changed"])
+	}
+}
+
 func TestHookRejectsNonGoFile(t *testing.T) {
 	bin := buildHook(t)
 	repoDir, sha := newRepo(t, map[string]string{"main.go": "package main\n", "notes.md": "hello\n"})

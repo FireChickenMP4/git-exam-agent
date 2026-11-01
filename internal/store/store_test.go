@@ -162,6 +162,45 @@ func TestPushEventsAndFinalize(t *testing.T) {
 	}
 }
 
+func TestPushEventUpsert(t *testing.T) {
+	st := newTestStore(t)
+	seedExam(t, st)
+	id, err := st.UpsertCandidate(&Candidate{ExamID: "2027-spring", StudentNo: "20231238", Name: "钱七"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertRepo(id, "http://gitea/20231238/exam.git"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	// webhook 先到：只有文件数
+	if err := st.AddPushEvent(&PushEvent{CandidateID: id, Ref: "refs/heads/main", CommitSHA: "sha1", ReceivedAt: now, FilesChanged: 2, Source: "webhook"}); err != nil {
+		t.Fatal(err)
+	}
+	// post-receive 后到：补全行数，不新增记录
+	if err := st.AddPushEvent(&PushEvent{CandidateID: id, Ref: "refs/heads/main", CommitSHA: "sha1", ReceivedAt: now.Add(time.Second), LinesAdded: 42, LinesDeleted: 7, FilesChanged: 2, Source: "post-receive"}); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := st.CountPushEvents(id); err != nil || n != 1 {
+		t.Fatalf("同 commit 应去重，count=%d err=%v", n, err)
+	}
+	ev, err := st.LastPushEvent(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev.LinesAdded != 42 || ev.LinesDeleted != 7 || ev.FilesChanged != 2 {
+		t.Fatalf("行数未补全: %+v", ev)
+	}
+
+	// 新 commit 正常插入
+	if err := st.AddPushEvent(&PushEvent{CandidateID: id, Ref: "refs/heads/main", CommitSHA: "sha2", ReceivedAt: now.Add(2 * time.Second), LinesAdded: 3, FilesChanged: 1, Source: "post-receive"}); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := st.CountPushEvents(id); n != 2 {
+		t.Fatalf("新 commit 未插入，count=%d", n)
+	}
+}
+
 func TestAgentEvents(t *testing.T) {
 	st := newTestStore(t)
 	seedExam(t, st)

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-git/go-git/v5"
@@ -24,12 +25,17 @@ import (
 
 func main() {
 	var (
-		examdURL = flag.String("examd", envOr("EXAM_HOOK_URL", "http://127.0.0.1:8080"), "examd 地址")
-		token    = flag.String("token", os.Getenv("EXAM_HOOK_TOKEN"), "hook 共享令牌")
-		failOpen = flag.Bool("fail-open", false, "examd 不可达时放行（默认拒绝）")
+		examdURL    = flag.String("examd", envOr("EXAM_HOOK_URL", "http://127.0.0.1:8080"), "examd 地址")
+		token       = flag.String("token", os.Getenv("EXAM_HOOK_TOKEN"), "hook 共享令牌")
+		failOpen    = flag.Bool("fail-open", false, "examd 不可达时放行（默认拒绝）")
+		postReceive = flag.Bool("post-receive", false, "以 post-receive 模式运行：只上报行数，不拦截推送")
 	)
 	flag.Parse()
 
+	if *postReceive {
+		runPostReceive(*examdURL, *token)
+		return
+	}
 	if err := run(*examdURL, *token, *failOpen); err != nil {
 		fmt.Fprintf(os.Stderr, "推送被拒绝: %v\n", err)
 		os.Exit(1)
@@ -272,4 +278,131 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// runPostReceive 在推送成功后上报文件数与增删行；失败只打日志，不影响推送结果。
+func runPostReceive(examdURL, token string) {
+	repo, err := git.PlainOpen(".")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "post-receive: 打开仓库失败: %v\n", err)
+		return
+	}
+	repoPath, err := filepath.Abs(".")
+	if err != nil {
+		repoPath = "."
+	}
+	raw, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "post-receive: 读取推送信息失败: %v\n", err)
+		return
+	}
+	for _, line := range bytes.Split(bytes.TrimSpace(raw), []byte("\n")) {
+		fields := bytes.Fields(line)
+		if len(fields) != 3 {
+			continue
+		}
+		oldSHA, newSHA, ref := string(fields[0]), string(fields[1]), string(fields[2])
+		if gate.ZeroSHA(newSHA) {
+			continue
+		}
+		files, added, deleted, err := diffStats(repo, oldSHA, newSHA)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "post-receive: 统计 %s 失败: %v\n", newSHA, err)
+			continue
+		}
+		if err := reportPush(examdURL, token, repoPath, ref, oldSHA, newSHA, files, added, deleted); err != nil {
+			fmt.Fprintf(os.Stderr, "post-receive: 上报失败: %v\n", err)
+		}
+	}
+}
+
+func diffStats(repo *git.Repository, oldSHA, newSHA string) (files, added, deleted int, err error) {
+	newCommit, err := repo.CommitObject(plumbing.NewHash(newSHA))
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	newTree, err := newCommit.Tree()
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	if gate.ZeroSHA(oldSHA) {
+		err = newTree.Files().ForEach(func(f *object.File) error {
+			content, err := f.Contents()
+			if err != nil {
+				return nil
+			}
+			files++
+			added += countLines(content)
+			return nil
+		})
+		return files, added, 0, err
+	}
+	oldCommit, err := repo.CommitObject(plumbing.NewHash(oldSHA))
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	oldTree, err := oldCommit.Tree()
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	changes, err := object.DiffTree(oldTree, newTree)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	for _, change := range changes {
+		files++
+		patch, err := change.Patch()
+		if err != nil {
+			continue
+		}
+		for _, stat := range patch.Stats() {
+			added += stat.Addition
+			deleted += stat.Deletion
+		}
+	}
+	return files, added, deleted, nil
+}
+
+func countLines(s string) int {
+	if s == "" {
+		return 0
+	}
+	n := strings.Count(s, "\n")
+	if !strings.HasSuffix(s, "\n") {
+		n++
+	}
+	return n
+}
+
+func reportPush(examdURL, token, repoPath, ref, oldSHA, newSHA string, files, added, deleted int) error {
+	payload, err := json.Marshal(checkRequest{
+		RepoPath:     repoPath,
+		Ref:          ref,
+		OldSHA:       oldSHA,
+		NewSHA:       newSHA,
+		FilesChanged: files,
+		LinesAdded:   added,
+		LinesDeleted: deleted,
+	})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPost, examdURL+"/api/hooks/push", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("X-Exam-Hook-Token", token)
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("examd 返回 %d", resp.StatusCode)
+	}
+	return nil
 }

@@ -1,0 +1,6 @@
+#!/bin/sh
+# Gitea post-receive 钩子入口：推送成功后上报文件数与增删行。
+exec /data/gitea/custom/hooks/exam-hook \
+  --examd "${EXAM_HOOK_URL:-http://examd:8080}" \
+  --token "${EXAM_HOOK_TOKEN:-}" \
+  --post-receive

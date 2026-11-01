@@ -191,6 +191,43 @@ func (s *Server) handlePreReceive(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"allow": true})
 }
 
+func (s *Server) handlePostReceive(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Gitea.HookToken != "" {
+		got := r.Header.Get("X-Exam-Hook-Token")
+		if subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.Gitea.HookToken)) != 1 {
+			writeError(w, http.StatusUnauthorized, "钩子令牌无效")
+			return
+		}
+	}
+	var req preReceiveRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "推送信息格式错误")
+		return
+	}
+	owner, repoName := parseRepoPath(req.RepoPath)
+	candidate, err := s.st.CandidateByRepo(owner, repoName)
+	if err != nil {
+		// 练习仓库等未登记仓库不记录
+		writeJSON(w, http.StatusOK, map[string]bool{"ignored": true})
+		return
+	}
+	if err := s.st.UpsertPushEvent(&store.PushEvent{
+		CandidateID:  candidate.ID,
+		Ref:          req.Ref,
+		CommitSHA:    req.NewSHA,
+		ReceivedAt:   time.Now(),
+		LinesAdded:   req.LinesAdded,
+		LinesDeleted: req.LinesDeleted,
+		FilesChanged: req.FilesChanged,
+		Source:       "post-receive",
+	}); err != nil {
+		s.logf("post-receive: 记录推送失败: %v", err)
+		writeError(w, http.StatusInternalServerError, "记录推送失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 func parseRepoPath(p string) (string, string) {
 	p = strings.TrimSpace(p)
 	p = strings.TrimSuffix(filepath.ToSlash(p), "/")

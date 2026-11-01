@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -9,10 +10,12 @@ import (
 	"strings"
 	"time"
 
+	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"golang.org/x/crypto/bcrypt"
 
 	"exam.local/tools/internal/judge"
 	"exam.local/tools/internal/report"
+	"exam.local/tools/internal/review"
 	"exam.local/tools/internal/roster"
 	"exam.local/tools/internal/store"
 )
@@ -501,6 +504,85 @@ func (s *Server) handleAdminJudge(w http.ResponseWriter, r *http.Request) {
 		"candidates": len(results),
 		"ok":         accepted,
 		"csv":        csvPath,
+	})
+}
+
+type reviewRequest struct {
+	Student          string `json:"student"`
+	IncludeHeartbeat bool   `json:"include_heartbeat"`
+	BulkLines        int    `json:"bulk_lines"`
+	MaxGapSeconds    int    `json:"max_gap_seconds"`
+}
+
+func (s *Server) handleAdminReview(w http.ResponseWriter, r *http.Request) {
+	exam, ok := s.examFromPath(w, r)
+	if !ok {
+		return
+	}
+	var req reviewRequest
+	if r.ContentLength > 0 {
+		if err := readJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "请求格式错误")
+			return
+		}
+	}
+	if req.BulkLines <= 0 {
+		req.BulkLines = 200
+	}
+	maxGap := time.Duration(req.MaxGapSeconds) * time.Second
+	if maxGap <= 0 {
+		maxGap = 10 * time.Minute
+	}
+
+	opts := review.Options{
+		WorkDir:          s.cfg.JudgeWorkDir(),
+		IncludeHeartbeat: req.IncludeHeartbeat,
+		BulkLines:        req.BulkLines,
+		MaxGap:           maxGap,
+		Logf:             s.logf,
+	}
+	if s.gc != nil {
+		user, pass := s.gc.BasicAuth()
+		opts.Auth = &githttp.BasicAuth{Username: user, Password: pass}
+		opts.CABundle = s.gc.CABundle()
+		opts.InsecureSkipTLS = s.gc.InsecureSkipTLS()
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
+	defer cancel()
+	rows, err := review.Run(ctx, s.st, exam.ID, req.Student, opts)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	var buf bytes.Buffer
+	if err := review.WriteCSV(&buf, rows); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	bulk, gaps := 0, 0
+	for _, row := range rows {
+		if strings.Contains(row.Flags, "bulk_change") {
+			bulk++
+		}
+		if strings.Contains(row.Flags, "long_gap") {
+			gaps++
+		}
+	}
+
+	admin := adminFrom(r)
+	actor := ""
+	if admin != nil {
+		actor = admin.Username
+	}
+	_ = s.st.AddAudit(exam.ID, "admin", actor, "review", exam.ID,
+		fmt.Sprintf("student=%s rows=%d", req.Student, len(rows)))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"rows":        len(rows),
+		"bulk_change": bulk,
+		"long_gap":    gaps,
+		"csv":         buf.String(),
 	})
 }
 

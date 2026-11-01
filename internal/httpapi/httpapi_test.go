@@ -308,6 +308,34 @@ func TestAdminFlowAndHooks(t *testing.T) {
 		t.Fatalf("push events = %d, %v", n, err)
 	}
 
+	// post-receive 后到：补全行数但不重复记录
+	pushStats := map[string]any{
+		"repo_path":     "/data/git/repositories/20231234/exam-2027-20231234.git",
+		"ref":           "refs/heads/main",
+		"old_sha":       strings.Repeat("1", 40),
+		"new_sha":       "deadbeef",
+		"files_changed": 1,
+		"lines_added":   42,
+		"lines_deleted": 7,
+	}
+	req, _ = http.NewRequest(http.MethodPost, env.srv.URL+"/api/hooks/push", mustJSON(t, pushStats))
+	req.Header.Set("X-Exam-Hook-Token", "hook-secret")
+	resp, err = admin.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("post-receive 返回 %d", resp.StatusCode)
+	}
+	if n, _ := env.st.CountPushEvents(env.candidate.ID); n != 1 {
+		t.Fatalf("post-receive 不应新增记录，count=%d", n)
+	}
+	lastPush, err := env.st.LastPushEvent(env.candidate.ID)
+	if err != nil || lastPush.LinesAdded != 42 || lastPush.LinesDeleted != 7 {
+		t.Fatalf("行数未补全: %+v %v", lastPush, err)
+	}
+
 	// pre-receive：考试进行中允许
 	pre := map[string]any{
 		"repo_path":     "/data/git/repositories/20231234/exam-2027-20231234.git",

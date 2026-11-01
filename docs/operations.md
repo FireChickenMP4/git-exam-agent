@@ -49,6 +49,9 @@ make dist
 bash deploy/gitea/install-hooks.sh bin/exam-hook-linux-amd64
 ```
 
+脚本会同时安装 `pre-receive`（拦截）和 `post-receive`（上报推送文件数与增删行）；两者共用同一个
+`exam-hook` 二进制。push_event 按 commit 去重，webhook 与 post-receive 任意先后到达都不会重复。
+
 判题镜像：
 
 ```bash
