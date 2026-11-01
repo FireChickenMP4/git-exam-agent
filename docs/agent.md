@@ -13,6 +13,9 @@
 7. 每 10 秒输出状态行（最后提交、最后推送、失败次数、网络）。
 8. 退出（Ctrl+C / 关机）前尽力提交并推送一次。
 9. 配置了 `examd_url` 时，事件同时上报 examd，看板显示最后一条 agent 事件。
+10. 保存级采样：一次保存让白名单文件增长超过 `bulk_edit_bytes`（默认 4096 字节）时，写一条
+    `bulk_edit` 事件（文件、增长字节、当前大小）；只统计字节数，不读内容、不碰剪贴板。
+    该值设为负数可禁用。
 
 ## 只提交白名单文件
 
@@ -37,6 +40,7 @@
   "examd_url": "http://10.0.0.10:8080",
   "ca_file": "",
   "insecure_skip_verify": false,
+  "bulk_edit_bytes": 4096,
   "debounce_ms": 3000,
   "push_interval_ms_min": 10000,
   "push_interval_ms_max": 30000,

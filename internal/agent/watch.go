@@ -19,7 +19,7 @@ type watcher struct {
 	closed bool
 }
 
-func newWatcher(root string, onChange func()) (*watcher, error) {
+func newWatcher(root string, onChange func(string, fsnotify.Op)) (*watcher, error) {
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, fmt.Errorf("创建文件监听: %w", err)
@@ -34,7 +34,7 @@ func newWatcher(root string, onChange func()) (*watcher, error) {
 	return w, nil
 }
 
-func (w *watcher) loop(onChange func()) {
+func (w *watcher) loop(onChange func(string, fsnotify.Op)) {
 	defer w.wg.Done()
 	for {
 		select {
@@ -52,7 +52,7 @@ func (w *watcher) loop(onChange func()) {
 					_ = w.addRecursive(ev.Name)
 				}
 			}
-			onChange()
+			onChange(ev.Name, ev.Op)
 		case _, ok := <-w.fsw.Errors:
 			if !ok {
 				return

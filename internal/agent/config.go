@@ -16,6 +16,7 @@ const (
 	defaultPushIntervalMSMax = 30000
 	defaultHeartbeatMSMin    = 55000
 	defaultHeartbeatMSMax    = 65000
+	defaultBulkEditBytes     = 4096
 )
 
 // Config 对应 .exam-agent.json。
@@ -27,6 +28,7 @@ type Config struct {
 	ExamdURL           string `json:"examd_url"`
 	CAFile             string `json:"ca_file"`
 	InsecureSkipVerify bool   `json:"insecure_skip_verify"`
+	BulkEditBytes      int64  `json:"bulk_edit_bytes"`
 	DebounceMS         int    `json:"debounce_ms"`
 	PushIntervalMSMin  int    `json:"push_interval_ms_min"`
 	PushIntervalMSMax  int    `json:"push_interval_ms_max"`
@@ -66,6 +68,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.DebounceMS <= 0 {
 		c.DebounceMS = defaultDebounceMS
+	}
+	if c.BulkEditBytes == 0 {
+		c.BulkEditBytes = defaultBulkEditBytes
 	}
 	if c.PushIntervalMSMin <= 0 {
 		c.PushIntervalMSMin = defaultPushIntervalMSMin

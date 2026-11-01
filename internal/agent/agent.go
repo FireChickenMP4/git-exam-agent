@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 )
@@ -34,6 +35,7 @@ type Agent struct {
 
 	events *EventLog
 	rand   *rand.Rand
+	bulk   *bulkTracker
 
 	mu         sync.Mutex
 	dirty      bool
@@ -104,6 +106,16 @@ func Run(ctx context.Context, cfg *Config, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	a.bulk = newBulkTracker(dir, cfg.BulkEditBytes, 500*time.Millisecond,
+		func(path string, delta, size, prev int64) {
+			a.events.Write("bulk_edit", map[string]any{
+				"path":      path,
+				"bytes":     delta,
+				"size":      size,
+				"prev_size": prev,
+			})
+			a.logf("bulk edit %s +%d bytes", path, delta)
+		})
 	w, err := newWatcher(dir, a.noteChange)
 	if err != nil {
 		return err
@@ -224,11 +236,12 @@ func (a *Agent) debounceElapsed(now time.Time) bool {
 	return a.dirty && now.Sub(a.lastChange) >= a.cfg.Debounce()
 }
 
-func (a *Agent) noteChange() {
+func (a *Agent) noteChange(path string, op fsnotify.Op) {
 	a.mu.Lock()
 	a.dirty = true
 	a.lastChange = time.Now()
 	a.mu.Unlock()
+	a.bulk.Note(path, op)
 }
 
 func (a *Agent) hasDirty() bool {

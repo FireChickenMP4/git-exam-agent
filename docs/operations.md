@@ -148,6 +148,7 @@ $BIN restore -config $CFG -in backup.tar.gz -force
 - 默认不输出心跳提交，需要时加 `-include-heartbeat`。
 - commit 时间是考生机器时钟，可能被修改；服务器收到推送的时间以 `push_event` 为准。
 - `bulk_change` 只是“大块改动”的启发式标记，不能证明是粘贴；系统不采集键盘/粘贴事件。
+- agent 的 `bulk_edit` 事件（保存级、默认 >4KB）是同一类启发式信号，只能说明“这一次保存写入了很多字节”。
 - 复核需要 clone 仓库，使用与判题相同的 Gitea 凭据和 `ca_file` 配置。
 
 ## 6. 验收对照
