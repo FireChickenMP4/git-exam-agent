@@ -25,6 +25,9 @@ docker compose -f deploy/docker-compose.example.yml up -d --build
 bash deploy/gitea/init.sh                       # 创建管理员并打印 GITEA_ADMIN_TOKEN
 ```
 
+> examd 镜像构建默认使用 `GOPROXY=https://goproxy.cn,direct`；海外构建机可加
+> `--build-arg GOPROXY=https://proxy.golang.org,direct`。
+
 把 `init.sh` 打印的令牌写入 `deploy/.env` 的 `GITEA_ADMIN_TOKEN`，重启 examd：
 
 ```bash

@@ -1,5 +1,10 @@
 FROM golang:1.26-alpine AS build
 
+# 考场通常无外网；构建机在中国大陆时默认走 goproxy.cn。
+# 海外构建可传 --build-arg GOPROXY=https://proxy.golang.org,direct
+ARG GOPROXY=https://goproxy.cn,direct
+ENV GOPROXY=${GOPROXY}
+
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

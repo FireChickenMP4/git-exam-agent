@@ -16,6 +16,7 @@
 | K-08 | 无法确认判题是否真的走了 Docker | 本机同时装了 Go，`local` 与 `docker` 都可能成功 | 压测配置把 `judge.go_bin` 指向不存在的路径，`runtime: docker` 仍 2/2 通过，证明容器路径生效 |
 | K-09 | Windows 上演练脚本用错 bash | `push-load.sh` 被 WSL 的 `/bin/bash` 执行，报 `No such file or directory` | 用 Git for Windows 的 `bin\bash.exe` 执行；`deploy/drill/README.md` 已注明 |
 | K-10 | Docker Desktop 看似“坏了” | `docker info` 只有 Client，没有 Server | 实际是 `com.docker.service` 与 WSL 发行版 `docker-desktop` 都停了；`docker desktop start` 后恢复，不是安装损坏 |
+| K-11 | examd 镜像在国内网络构建失败 | `go mod download` 访问 `proxy.golang.org` 被拒（connection refused） | Dockerfile 增加 `GOPROXY` build-arg，默认 `https://goproxy.cn,direct`；实测镜像构建成功、容器内 `examd version` 正常 |
 
 ## 已知边界（本轮已关闭）
 
