@@ -20,9 +20,10 @@ import (
 const branchName = "main"
 
 const (
-	initialCommitMessage   = "agent: initial commit"
-	autoCommitMessage      = "agent: auto-commit"
-	heartbeatCommitMessage = "agent: heartbeat"
+	initialCommitMessage    = "agent: initial commit"
+	autoCommitMessage       = "agent: auto-commit"
+	heartbeatCommitMessage  = "agent: heartbeat"
+	checkpointCommitMessage = "agent: checkpoint"
 )
 
 // 提交白名单见 internal/paths，与 pre-receive 钩子保持一致。
@@ -137,6 +138,24 @@ func (a *Agent) commitAll(message string, when time.Time, allowEmpty bool) (comm
 	}
 	res.SHA = hash.String()
 	return res, nil
+}
+
+// commitEmpty 只创建空提交，不暂存工作区，避免把真实改动包进心跳。
+func (a *Agent) commitEmpty(message string, when time.Time) (commitResult, error) {
+	sig := &object.Signature{
+		Name:  a.cfg.Username,
+		Email: a.cfg.Username + "@exam.local",
+		When:  when,
+	}
+	hash, err := a.wt.Commit(message, &git.CommitOptions{
+		Author:            sig,
+		Committer:         sig,
+		AllowEmptyCommits: true,
+	})
+	if err != nil {
+		return commitResult{}, fmt.Errorf("提交: %w", err)
+	}
+	return commitResult{SHA: hash.String()}, nil
 }
 
 // pushRemote 把本地 main 推到 origin。远端已是最新不算失败。

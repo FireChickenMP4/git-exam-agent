@@ -17,6 +17,8 @@
 | K-09 | Windows 上演练脚本用错 bash | `push-load.sh` 被 WSL 的 `/bin/bash` 执行，报 `No such file or directory` | 用 Git for Windows 的 `bin\bash.exe` 执行；`deploy/drill/README.md` 已注明 |
 | K-10 | Docker Desktop 看似“坏了” | `docker info` 只有 Client，没有 Server | 实际是 `com.docker.service` 与 WSL 发行版 `docker-desktop` 都停了；`docker desktop start` 后恢复，不是安装损坏 |
 | K-11 | examd 镜像在国内网络构建失败 | `go mod download` 访问 `proxy.golang.org` 被拒（connection refused） | Dockerfile 增加 `GOPROXY` build-arg，默认 `https://goproxy.cn,direct`；实测镜像构建成功、容器内 `examd version` 正常 |
+| K-12 | 心跳空提交污染复核 | 默认 10-25 秒一个空提交，2 小时约 240-480 条，`git log` 难以阅读 | 心跳默认改为 55-65 秒（仍满足每分钟有提交）；新增 `examd review`，默认过滤心跳并输出每次增删行、`bulk_change`/`long_gap` 标记 |
+| K-13 | 心跳把真实改动包进 heartbeat | 改动未到防抖时间时，心跳先提交并带上这些改动；复核按消息过滤心跳后，真实改动会消失 | 心跳改为只在工作区没有未提交改动时创建纯空提交；`TestHeartbeatDoesNotSwallowChanges` 覆盖 |
 
 ## 已知边界（本轮已关闭）
 
@@ -47,3 +49,4 @@
 - 事件上报：常驻 agent 跑 10 秒后看板 `push_count=3`、`last_agent_type=start`。
 - 检查点：`exam-agent -once` 输出 `checkpoint pushed`，push_count 从 3 变为 4。
 - 登录限流：连续 12 次错误令牌，前 10 次 401，第 11/12 次 429。
+- 复核时间线：仓库共 5 个提交（3 个心跳），`examd review` 默认输出 2 行；一次插入 300 行的提交标记为 `bulk_change`。

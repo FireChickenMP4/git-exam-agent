@@ -7,7 +7,7 @@
 1. 在 `workspace` 初始化仓库（默认分支 `main`）并做首次提交。
 2. 递归监听工作区变化，安静 3 秒后提交（`debounce_ms`）。
 3. 提交后随机等待 10-30 秒再推送（`push_interval_ms_min/max`），把多次提交合并成一次 push。
-4. 无改动时按 `heartbeat_ms_min/max`（默认 10-25 秒）创建空提交，证明 agent 仍在运行。
+4. 无改动时按 `heartbeat_ms_min/max`（默认 55-65 秒）创建空提交，证明 agent 仍在运行；工作区有未提交改动时不会制造心跳，避免真实改动被包进心跳提交。心跳可用 `examd review` 过滤。
 5. 推送失败进入指数退避：2s、4s、8s……上限 60s，恢复后自动补推。
 6. 每 5 秒检查网卡地址变化；无线环境每 30 秒读取一次 SSID，变化时写入 `network_change` 事件。
 7. 每 10 秒输出状态行（最后提交、最后推送、失败次数、网络）。
@@ -40,8 +40,8 @@
   "debounce_ms": 3000,
   "push_interval_ms_min": 10000,
   "push_interval_ms_max": 30000,
-  "heartbeat_ms_min": 10000,
-  "heartbeat_ms_max": 25000
+  "heartbeat_ms_min": 55000,
+  "heartbeat_ms_max": 65000
 }
 ```
 

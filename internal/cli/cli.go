@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"exam.local/tools/internal/problem"
 	"exam.local/tools/internal/provision"
 	"exam.local/tools/internal/report"
+	"exam.local/tools/internal/review"
 	"exam.local/tools/internal/roster"
 	"exam.local/tools/internal/store"
 )
@@ -59,6 +61,8 @@ func Run(args []string, out, errOut io.Writer) int {
 		err = cmdToken(rest, out, errOut)
 	case "judge":
 		err = cmdJudge(rest, out, errOut)
+	case "review":
+		err = cmdReview(rest, out, errOut)
 	case "export":
 		err = cmdExport(rest, out, errOut)
 	case "backup":
@@ -95,6 +99,7 @@ func usage(w io.Writer) {
   examd provision  -config config.yaml -exam 2027-spring -slips slips.csv
   examd token      -config config.yaml -exam 2027-spring -student 20231234
   examd judge      -config config.yaml -exam 2027-spring -out results.csv [-student 20231234]
+  examd review     -config config.yaml -exam 2027-spring -out review.csv [-student 20231234] [-include-heartbeat]
   examd export     -config config.yaml -exam 2027-spring -out report.csv
   examd backup     -config config.yaml -out backup.tar.gz
   examd restore    -config config.yaml -in backup.tar.gz [-force]
@@ -578,6 +583,94 @@ func cmdJudge(args []string, out, errOut io.Writer) error {
 		}
 	}
 	fmt.Fprintf(errOut, "judged=%d accepted_candidates=%d\n", len(results), accepted)
+	return nil
+}
+
+func cmdReview(args []string, out, errOut io.Writer) error {
+	fs := newFlags("review", errOut)
+	configPath := fs.String("config", "config.yaml", "配置文件")
+	examID := fs.String("exam", "", "场次 ID")
+	student := fs.String("student", "", "只复核某学号")
+	outPath := fs.String("out", "-", "时间线 CSV 路径，- 表示标准输出")
+	includeHeartbeat := fs.Bool("include-heartbeat", false, "包含心跳空提交")
+	bulkLines := fs.Int("bulk-lines", 200, "单次增删行数达到多少标记 bulk_change")
+	maxGap := fs.String("max-gap", "10m", "提交间隔超过多久标记 long_gap")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *examID == "" {
+		return fmt.Errorf("必须提供 -exam")
+	}
+	gap, err := time.ParseDuration(*maxGap)
+	if err != nil {
+		return fmt.Errorf("max-gap 格式错误: %w", err)
+	}
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		return err
+	}
+	st, err := openStore(cfg)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	opts := review.Options{
+		WorkDir:          cfg.JudgeWorkDir(),
+		IncludeHeartbeat: *includeHeartbeat,
+		BulkLines:        *bulkLines,
+		MaxGap:           gap,
+		Logf:             loggerTo(errOut),
+	}
+	gc, err := newGitea(cfg)
+	if err != nil {
+		return err
+	}
+	if gc != nil {
+		user, pass := gc.BasicAuth()
+		opts.Auth = &githttp.BasicAuth{Username: user, Password: pass}
+		opts.CABundle = gc.CABundle()
+		opts.InsecureSkipTLS = gc.InsecureSkipTLS()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
+	defer cancel()
+	rows, err := review.Run(ctx, st, *examID, *student, opts)
+	if err != nil {
+		return err
+	}
+
+	var w io.Writer = out
+	var f *os.File
+	if *outPath != "-" {
+		f, err = os.Create(*outPath)
+		if err != nil {
+			return err
+		}
+		w = f
+	}
+	if err := review.WriteCSV(w, rows); err != nil {
+		if f != nil {
+			f.Close()
+		}
+		return err
+	}
+	if f != nil {
+		if err := f.Close(); err != nil {
+			return err
+		}
+	}
+
+	bulk, gaps := 0, 0
+	for _, r := range rows {
+		if strings.Contains(r.Flags, "bulk_change") {
+			bulk++
+		}
+		if strings.Contains(r.Flags, "long_gap") {
+			gaps++
+		}
+	}
+	fmt.Fprintf(errOut, "review rows=%d bulk_change=%d long_gap=%d\n", len(rows), bulk, gaps)
 	return nil
 }
 

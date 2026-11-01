@@ -14,8 +14,8 @@ const (
 	defaultDebounceMS        = 3000
 	defaultPushIntervalMSMin = 10000
 	defaultPushIntervalMSMax = 30000
-	defaultHeartbeatMSMin    = 10000
-	defaultHeartbeatMSMax    = 25000
+	defaultHeartbeatMSMin    = 55000
+	defaultHeartbeatMSMax    = 65000
 )
 
 // Config 对应 .exam-agent.json。

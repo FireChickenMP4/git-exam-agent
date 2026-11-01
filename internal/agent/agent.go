@@ -155,7 +155,7 @@ func RunOnce(ctx context.Context, cfg *Config, out io.Writer) error {
 	a.enableRemote()
 
 	now := time.Now()
-	res, err := a.commitAll(autoCommitMessage, now, false)
+	res, err := a.commitAll(checkpointCommitMessage, now, false)
 	if err != nil {
 		return err
 	}
@@ -243,7 +243,12 @@ func (a *Agent) heartbeat(now time.Time) {
 	if !a.lastCommit.IsZero() && now.Sub(a.lastCommit) < minGap {
 		return
 	}
-	res, err := a.commitAll(heartbeatCommitMessage, now, true)
+	// 工作区有未提交改动时不要抢在防抖提交前制造 heartbeat，
+	// 否则真实改动会被 heartbeat 消息包裹，复核时被当成心跳过滤掉。
+	if a.hasPendingChanges() {
+		return
+	}
+	res, err := a.commitEmpty(heartbeatCommitMessage, now)
 	if err != nil {
 		a.logf("heartbeat failed: %v", err)
 		return
@@ -251,7 +256,19 @@ func (a *Agent) heartbeat(now time.Time) {
 	a.lastCommit, a.commitSHA = now, res.SHA
 	a.logf("heartbeat %s", shortSHA(res.SHA))
 	a.schedulePush(now)
-	a.reportSkipped(res.Skipped)
+}
+
+func (a *Agent) hasPendingChanges() bool {
+	status, err := a.wt.Status()
+	if err != nil {
+		return false
+	}
+	for p := range status {
+		if allowedPath(p) {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Agent) schedulePush(now time.Time) {

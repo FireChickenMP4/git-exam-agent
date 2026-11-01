@@ -26,7 +26,7 @@ func TestLoadConfigDefaultsAndPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
-	if cfg.DebounceMS != 3000 || cfg.PushIntervalMSMin != 10000 || cfg.HeartbeatMSMax != 25000 {
+	if cfg.DebounceMS != 3000 || cfg.PushIntervalMSMin != 10000 || cfg.HeartbeatMSMax != 65000 {
 		t.Fatalf("默认值未生效: %+v", cfg)
 	}
 	want := filepath.Join(dir, "exam-2027-20231234")

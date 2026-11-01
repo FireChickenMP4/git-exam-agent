@@ -165,6 +165,38 @@ func TestRunOnceCheckpoint(t *testing.T) {
 	}
 }
 
+func TestHeartbeatDoesNotSwallowChanges(t *testing.T) {
+	a, work, _ := newTestAgent(t)
+	writeFile(t, work, "main.go", "package main\n")
+	first, err := a.commitAll(autoCommitMessage, time.Now(), false)
+	if err != nil || first.SHA == "" {
+		t.Fatalf("首个提交失败: %v", err)
+	}
+	headBefore, err := a.repo.Head()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeFile(t, work, "main.go", "package main\n\n// 真实改动\n")
+	a.lastCommit = time.Now().Add(-2 * time.Minute)
+	a.heartbeat(time.Now())
+
+	headAfter, err := a.repo.Head()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if headAfter.Hash() != headBefore.Hash() {
+		t.Fatal("有未提交改动时心跳不应提交")
+	}
+	res, err := a.commitAll(autoCommitMessage, time.Now(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.SHA == "" || res.SHA == first.SHA {
+		t.Fatalf("真实改动未被 auto-commit 提交: %+v", res)
+	}
+}
+
 func TestHeartbeatOnEmptyRepo(t *testing.T) {
 	a, _, _ := newTestAgent(t)
 	hb, err := a.commitAll(heartbeatCommitMessage, time.Now(), true)

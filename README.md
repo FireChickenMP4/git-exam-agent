@@ -85,7 +85,7 @@ agent 配置与安装见 `docs/agent.md`；题目目录格式见 `docs/problems.
 - exam-agent：防抖提交、随机间隔推送、心跳空提交、指数退避、网络变化事件、状态行
 - 题面页：令牌登录、变体、水印、禁止复制/右键/打印、切屏遮罩、公告、须知确认
 - pre-receive 钩子：分支/force-push/路径白名单/大小/冻结
-- 管理端：名单导入、开通、开考、冻结、封存、看板、公告、报表、判题、备份
+- 管理端：名单导入、开通、开考、冻结、封存、看板、公告、报表、判题、复核时间线、备份
 - 判题：clone/checkout/编译/逐用例/落库/CSV（docker 或 local runtime）
 - 备份与恢复、自动冻结、审计记录
 
@@ -102,4 +102,5 @@ agent 配置与安装见 `docs/agent.md`；题目目录格式见 `docs/problems.
   为证明走的是 Docker 而非本机 Go，压测配置把 `judge.go_bin` 故意指向不存在的路径。
 - 断网演练：停掉 Gitea 20 秒，agent 出现 `push failed` 并按 2s/4s/8s/16s 退避，
   Gitea 恢复后自动补推成功。
+- 复核：`examd review` 默认过滤心跳提交，输出每次提交的增删行与 `bulk_change` / `long_gap` 标记。
 - `make lint`、`make build`、`make dist`（windows/darwin/linux）通过。

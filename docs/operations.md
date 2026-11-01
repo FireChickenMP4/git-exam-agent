@@ -120,12 +120,35 @@ $BIN export -config $CFG -exam 2027-spring -out report.csv
 $BIN judge -config $CFG -exam 2027-spring -out results.csv
 $BIN judge -config $CFG -exam 2027-spring -out one.csv -student 20231234
 
+# 复核时间线（默认排除心跳提交）
+$BIN review -config $CFG -exam 2027-spring -out review.csv
+$BIN review -config $CFG -exam 2027-spring -student 20231234 -out one.csv
+$BIN review -config $CFG -exam 2027-spring -include-heartbeat -out review-all.csv
+
 # 备份 / 恢复（恢复前停止 examd）
 $BIN backup -config $CFG -out backup.tar.gz
 $BIN restore -config $CFG -in backup.tar.gz -force
 ```
 
 判题结果同时写入 `judge_result` 表，报表中的 `judge_score` 与每题 `passed/total` 来自这里。
+
+### 复核时间线字段
+
+`examd review` 逐 commit 计算与父提交的差异，输出：
+
+| 字段 | 含义 |
+|---|---|
+| `time` / `gap_seconds` | commit 时间（客户端时钟）与距上一提交的间隔 |
+| `kind` | `initial` / `template` / `auto` / `checkpoint` / `heartbeat` / `empty` / `other` |
+| `files` / `insertions` / `deletions` | 本次提交改动的文件数与增删行 |
+| `flags` | `bulk_change`（单次 >=200 行或 >=15 个文件）、`long_gap`（>10m）、`before_window` / `after_window` |
+
+注意：
+
+- 默认不输出心跳提交，需要时加 `-include-heartbeat`。
+- commit 时间是考生机器时钟，可能被修改；服务器收到推送的时间以 `push_event` 为准。
+- `bulk_change` 只是“大块改动”的启发式标记，不能证明是粘贴；系统不采集键盘/粘贴事件。
+- 复核需要 clone 仓库，使用与判题相同的 Gitea 凭据和 `ca_file` 配置。
 
 ## 6. 验收对照
 
