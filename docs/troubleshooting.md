@@ -43,3 +43,6 @@
 - 70 客户端压测：开通 39.8s、并发推送 18.3s、看板 70/70、冻结 final commit 缺失 0、Docker 判题 102.6s。
 - 断网演练：停 Gitea 20s，agent 出现 `push failed`（2s/4s/8s/16s 退避），Gitea 恢复后自动补推。
 - 崩溃恢复：强杀 examd 后重启数据正常；备份包恢复到全新目录后报表逐行一致。
+- 事件上报：常驻 agent 跑 10 秒后看板 `push_count=3`、`last_agent_type=start`。
+- 检查点：`exam-agent -once` 输出 `checkpoint pushed`，push_count 从 3 变为 4。
+- 登录限流：连续 12 次错误令牌，前 10 次 401，第 11/12 次 429。
