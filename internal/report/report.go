@@ -49,6 +49,8 @@ func Build(st *store.Store, examID string) ([]byte, error) {
 	for _, r := range results {
 		if r.ProblemID == 0 {
 			judgeStatus[r.CandidateID] = r.Status
+		} else if judgeStatus[r.CandidateID] == "" {
+			judgeStatus[r.CandidateID] = "ok"
 		}
 		if judgedByCandidate[r.CandidateID] == nil {
 			judgedByCandidate[r.CandidateID] = map[string]judged{}

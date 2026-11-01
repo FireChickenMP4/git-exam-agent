@@ -122,11 +122,15 @@ $BIN token -config $CFG -exam 2027-spring -student 20231234
 
 `exam.auto_freeze: true` 时，`ends_at + freeze_grace_seconds`（默认 30 秒）后自动：
 
-1. 以 Gitea 上 `main` 的实际分支头记录 `repo.final_commit`（webhook 未及时投递也不会漏），
+1. 状态先进入 `freezing`，pre-receive 立刻拒绝推送；
+2. 以 Gitea 上 `main` 的实际分支头记录 `repo.final_commit`（webhook 未及时投递也不会漏），
    读取失败的考生回退为最后一次推送事件；
-2. 场次状态改为 `frozen`；
 3. 归档 Gitea 仓库（只读）；
-4. pre-receive 钩子开始拒绝推送。
+4. 全部完成后状态改为 `frozen`。
+
+中途进程重启或 Gitea 报错时状态停在 `freezing`；再点一次“冻结/封存”或等自动冻结会续跑未完成部分。
+`freezing`/`frozen` 期间推送都会被拒绝。判题锁异常残留时用 `examd judge -exam <id> -unlock` 清除。
+Gitea 启用时缺少 `hook_token` 或 `webhook_secret`，examd 会直接启动失败，避免钩子/webhook 静默失效。
 
 也可以管理页手动“冻结”。
 

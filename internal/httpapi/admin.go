@@ -330,9 +330,11 @@ func (s *Server) handleAdminFreeze(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	pending, _ := s.freezePending(exam.ID)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"finalized": finalized,
 		"archived":  archived,
+		"pending":   pending,
 		"status":    "frozen",
 	})
 }
@@ -355,6 +357,15 @@ func (s *Server) handleAdminClose(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+	}
+	pending, err := s.freezePending(exam.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if pending > 0 {
+		writeError(w, http.StatusConflict, fmt.Sprintf("还有 %d 个仓库未完成冻结/归档，请先重试冻结并检查 Gitea", pending))
+		return
 	}
 	if err := s.st.SetExamStatus(exam.ID, "closed"); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

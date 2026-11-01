@@ -228,6 +228,8 @@ func statusText(status string) string {
 	switch status {
 	case "running":
 		return "进行中"
+	case "freezing":
+		return "已结束（正在冻结）"
 	case "frozen":
 		return "已结束（已冻结）"
 	case "closed":

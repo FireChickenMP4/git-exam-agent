@@ -509,7 +509,8 @@ func (r *Runner) probeHostMount(ctx context.Context, runDir string) error {
 		"test", "-f", "/check/" + marker,
 	}, nil, "", nil, 15*time.Second)
 	if out.err != nil {
-		return fmt.Errorf("judge.host_work_dir 与实际挂载不一致（%s）: %s", hostRun, truncate(string(out.stderr), 200))
+		return fmt.Errorf("判题探针失败（host_work_dir 不一致、镜像不可用或 Docker 不可访问）: %v %s",
+			out.err, truncate(string(out.stderr), 200))
 	}
 	return nil
 }

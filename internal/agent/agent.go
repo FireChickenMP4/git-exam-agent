@@ -178,8 +178,12 @@ func RunOnce(ctx context.Context, cfg *Config, out io.Writer) error {
 		events.Write("push_fail", map[string]any{"error": err.Error(), "phase": "checkpoint"})
 		return fmt.Errorf("推送失败: %w", err)
 	}
-	events.Write("checkpoint", map[string]any{"commit": res.SHA})
-	a.logf("checkpoint pushed %s", shortSHA(res.SHA))
+	pushedSHA := a.commitSHA
+	if pushedSHA == "" {
+		pushedSHA = res.SHA
+	}
+	events.Write("checkpoint", map[string]any{"commit": pushedSHA})
+	a.logf("checkpoint pushed %s", shortSHA(pushedSHA))
 	return nil
 }
 

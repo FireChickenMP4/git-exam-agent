@@ -244,7 +244,16 @@ func (s *Server) autoFreeze(ctx context.Context) {
 	now := time.Now()
 	grace := time.Duration(s.cfg.Exam.FreezeGraceSeconds) * time.Second
 	for _, e := range exams {
-		if (e.Status != "running" && e.Status != "freezing") || e.EndsAt.IsZero() {
+		if e.Status == "freezing" {
+			// 已进入冻结但上次中途失败：直接续跑，不依赖原定结束时间。
+			if _, _, err := s.FreezeExam(ctx, e.ID, "auto"); err != nil {
+				s.logf("resume freeze %s failed: %v", e.ID, err)
+			} else {
+				s.logf("resume freeze %s done", e.ID)
+			}
+			continue
+		}
+		if e.Status != "running" || e.EndsAt.IsZero() {
 			continue
 		}
 		if now.After(e.EndsAt.Add(grace)) {
@@ -274,7 +283,7 @@ func (s *Server) FreezeExam(ctx context.Context, examID, actor string) (int64, i
 		if err != nil {
 			return 0, 0, err
 		}
-		if !pending {
+		if pending == 0 {
 			return 0, 0, nil
 		}
 	}
@@ -344,28 +353,32 @@ func (s *Server) FreezeExam(ctx context.Context, examID, actor string) (int64, i
 	return finalized, archived, nil
 }
 
-func (s *Server) freezePending(examID string) (bool, error) {
+func (s *Server) freezePending(examID string) (int, error) {
 	candidates, err := s.st.ListCandidates(examID)
 	if err != nil {
-		return false, err
+		return 0, err
 	}
+	pending := 0
 	for _, c := range candidates {
+		if c.GiteaUser == "" || c.RepoName == "" {
+			continue
+		}
 		repo, err := s.st.GetRepoByCandidate(c.ID)
 		if err == store.ErrNotFound {
 			continue
 		}
 		if err != nil {
-			return false, err
+			return pending, err
 		}
 		if s.gc != nil {
 			if !repo.Archived {
-				return true, nil
+				pending++
 			}
 		} else if repo.FinalCommit == "" && !repo.LastPushAt.IsZero() {
-			return true, nil
+			pending++
 		}
 	}
-	return false, nil
+	return pending, nil
 }
 
 // NewJudgeRunner 构造判题器（HTTP 与 CLI 共用）。

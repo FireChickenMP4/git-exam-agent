@@ -126,6 +126,8 @@ func (c *Config) validate() error {
 		return fmt.Errorf("judge.runtime 只能是 docker 或 local")
 	case c.Judge.Runtime == "local" && !c.Judge.AllowLocal:
 		return fmt.Errorf("judge.runtime=local 需要显式设置 judge.allow_local: true")
+	case c.Judge.Runtime == "docker" && c.Judge.Image == "":
+		return fmt.Errorf("judge.runtime=docker 时 judge.image 不能为空")
 	case c.Judge.CompileConcurrency < 1:
 		return fmt.Errorf("judge.compile_concurrency 至少为 1")
 	case c.Judge.RunConcurrency < 1:
