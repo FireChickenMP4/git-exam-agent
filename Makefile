@@ -49,5 +49,12 @@ dist:
 judge-image:
 	docker build -f deploy/judge.Dockerfile -t exam-go:1.26 deploy
 
+# Windows 内部 CA 签名：密码从 SIGN_PFX_PASSWORD 环境变量读取
+SIGN_PFX ?= deploy/signing/certs/code-signing.pfx
+SIGN_ROOT_CER ?= deploy/signing/certs/root-ca.cer
+
+sign-windows:
+	pwsh -NoProfile -ExecutionPolicy Bypass -File deploy/signing/sign-windows.ps1 -Pfx "$(SIGN_PFX)" -RootCer "$(SIGN_ROOT_CER)" -Files "$(BIN)/exam-agent.exe"
+
 clean:
 	rm -rf $(BIN) $(DIST)

@@ -6,4 +6,6 @@ data/
 .exam-agent.json
 .exam-agent.events.jsonl
 .exam-agent.log
+deploy/signing/certs/
+*.pfx
 .DS_Store

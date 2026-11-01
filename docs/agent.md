@@ -90,7 +90,7 @@ macOS 使用 LaunchAgent，Linux 使用 systemd user unit（`systemctl --user`�
 - 如果机房组策略禁止创建计划任务，改用“启动”文件夹快捷方式，或让考生手动运行
   `exam-agent -config ... -once` 打检查点；都不需要提权。
 - 未签名的自编译 exe 有被 Defender/第三方杀软启发式误报的风险（文件监听 + 自动提交 + 计划任务
-  这类行为容易命中通用规则）。建议按优先级处理：
+  这类行为容易命中通用规则）。内部 CA 自签的完整步骤见 `deploy/signing/README.md`，优先级：
   1. 用代码签名证书给 `exam-agent.exe` 做 Authenticode 签名并加时间戳；
   2. 考前把样本提交给 Microsoft/在用杀软做误报申诉；
   3. T-7 真机演练时逐台确认；分发用 U 盘并附 SHA256，必要时 `Unblock-File`；
