@@ -45,7 +45,11 @@ func Build(st *store.Store, examID string) ([]byte, error) {
 	}
 	judgedByCandidate := map[int64]map[string]judged{}
 	totalByCandidate := map[int64]int{}
+	judgeStatus := map[int64]string{}
 	for _, r := range results {
+		if r.ProblemID == 0 {
+			judgeStatus[r.CandidateID] = r.Status
+		}
 		if judgedByCandidate[r.CandidateID] == nil {
 			judgedByCandidate[r.CandidateID] = map[string]judged{}
 		}
@@ -64,7 +68,7 @@ func Build(st *store.Store, examID string) ([]byte, error) {
 
 	var buf bytes.Buffer
 	cw := csv.NewWriter(&buf)
-	header := []string{"student_no", "name", "track", "status", "push_count", "last_push_at", "final_commit", "archived", "judge_score"}
+	header := []string{"student_no", "name", "track", "status", "push_count", "last_push_at", "final_commit", "archived", "judge_status", "judge_score"}
 	header = append(header, keys...)
 	if err := cw.Write(header); err != nil {
 		return nil, err
@@ -80,6 +84,7 @@ func Build(st *store.Store, examID string) ([]byte, error) {
 			formatTime(row.LastPushAt),
 			row.FinalCommit,
 			strconv.FormatBool(row.Archived),
+			judgeStatus[c.ID],
 			strconv.Itoa(totalByCandidate[c.ID]),
 		}
 		per := judgedByCandidate[c.ID]

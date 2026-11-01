@@ -7,6 +7,7 @@ deploy/.env
 deploy/config.yaml
 deploy/signing/certs/
 deploy/gitea/custom/conf/
+deploy/gitea/custom/hooks/exam-hook
 *.pfx
 *.cer
 pr-notes/

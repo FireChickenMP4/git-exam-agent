@@ -102,9 +102,12 @@ func reviewRepo(ctx context.Context, studentNo, url string, exam *store.Exam, op
 	if err := os.MkdirAll(opts.WorkDir, 0o755); err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(opts.WorkDir, "review", sanitize(studentNo))
-	_ = os.RemoveAll(dir)
-	defer os.RemoveAll(dir)
+	base, err := os.MkdirTemp(opts.WorkDir, "review-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(base)
+	dir := filepath.Join(base, "repo")
 
 	repo, err := git.PlainCloneContext(ctx, dir, false, &git.CloneOptions{
 		URL:             url,

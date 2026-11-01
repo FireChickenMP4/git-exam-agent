@@ -178,6 +178,39 @@ func isNonFastForward(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "non-fast-forward")
 }
 
+// pushWithRecovery 推送；遇到历史分叉时自动备份并恢复到远端 main。
+func (a *Agent) pushWithRecovery(now time.Time) error {
+	err := a.pushRemote()
+	if err == nil {
+		return nil
+	}
+	if !isNonFastForward(err) {
+		return err
+	}
+	var oldHead string
+	if head, headErr := a.repo.Head(); headErr == nil {
+		oldHead = head.Hash().String()
+	}
+	a.logf("push rejected (history diverged), trying recovery")
+	backup, recErr := a.recoverDiverged(now)
+	if recErr != nil {
+		a.logf("recovery failed: %v", recErr)
+		a.events.Write("push_recover_fail", map[string]any{
+			"backup_branch": backup,
+			"old_head":      oldHead,
+			"error":         recErr.Error(),
+		})
+		return fmt.Errorf("%w; 自动恢复失败: %v", err, recErr)
+	}
+	a.logf("recovered onto remote main, local backup branch %s", backup)
+	a.events.Write("push_recover", map[string]any{
+		"backup_branch": backup,
+		"old_head":      oldHead,
+		"commit":        a.commitSHA,
+	})
+	return nil
+}
+
 // recoverDiverged 处理历史分叉：备份本地 main，重置到远端 main，再提交工作区并推送。
 func (a *Agent) recoverDiverged(now time.Time) (string, error) {
 	head, err := a.repo.Head()

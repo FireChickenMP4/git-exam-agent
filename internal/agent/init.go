@@ -25,8 +25,14 @@ func InitWorkspace(ctx context.Context, cfg *Config, out io.Writer) error {
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 		return fmt.Errorf("工作区已经是 git 仓库，无需初始化: %s", dir)
 	}
-	if entries, err := os.ReadDir(dir); err == nil && len(entries) > 0 {
-		return fmt.Errorf("工作区非空，请把 workspace 指向空目录或先移走文件: %s", dir)
+	if entries, err := os.ReadDir(dir); err == nil {
+		for _, e := range entries {
+			switch e.Name() {
+			case ".exam-agent.json", ".exam-agent.events.jsonl", ".exam-agent.log":
+				continue
+			}
+			return fmt.Errorf("工作区非空，请把 workspace 指向空目录或先移走文件: %s", dir)
+		}
 	}
 
 	var caBundle []byte
@@ -61,6 +67,17 @@ func InitWorkspace(ctx context.Context, cfg *Config, out io.Writer) error {
 		return nil
 	}
 	if err != nil {
+		// 克隆失败时清理半成品，避免下次提示“工作区非空”或“已是 git 仓库”。
+		_ = os.RemoveAll(filepath.Join(dir, ".git"))
+		if entries, readErr := os.ReadDir(dir); readErr == nil {
+			for _, e := range entries {
+				switch e.Name() {
+				case ".exam-agent.json", ".exam-agent.events.jsonl", ".exam-agent.log":
+					continue
+				}
+				_ = os.RemoveAll(filepath.Join(dir, e.Name()))
+			}
+		}
 		return fmt.Errorf("拉取仓库 %s: %w", cfg.Repo, err)
 	}
 	if out != nil {

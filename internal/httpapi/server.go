@@ -244,7 +244,7 @@ func (s *Server) autoFreeze(ctx context.Context) {
 	now := time.Now()
 	grace := time.Duration(s.cfg.Exam.FreezeGraceSeconds) * time.Second
 	for _, e := range exams {
-		if e.Status != "running" || e.EndsAt.IsZero() {
+		if (e.Status != "running" && e.Status != "freezing") || e.EndsAt.IsZero() {
 			continue
 		}
 		if now.After(e.EndsAt.Add(grace)) {
@@ -257,7 +257,7 @@ func (s *Server) autoFreeze(ctx context.Context) {
 	}
 }
 
-// FreezeExam 冻结场次、记录 final commit 并归档仓库。
+// FreezeExam 冻结场次、记录 final commit 并归档仓库；失败后可从 freezing/frozen 续跑。
 func (s *Server) FreezeExam(ctx context.Context, examID, actor string) (int64, int, error) {
 	s.freezeMu.Lock()
 	defer s.freezeMu.Unlock()
@@ -266,13 +266,23 @@ func (s *Server) FreezeExam(ctx context.Context, examID, actor string) (int64, i
 	if err != nil {
 		return 0, 0, err
 	}
-	if exam.Status == "frozen" || exam.Status == "closed" {
+	if exam.Status == "closed" {
 		return 0, 0, nil
 	}
-	// 先置 frozen，让 pre-receive 立刻开始拒绝推送，再做记录/归档；
-	// 否则读分支头到改状态之间到达的推送会被接受但不会被记录。
-	if err := s.st.SetExamStatus(examID, "frozen"); err != nil {
-		return 0, 0, err
+	if exam.Status == "frozen" {
+		pending, err := s.freezePending(examID)
+		if err != nil {
+			return 0, 0, err
+		}
+		if !pending {
+			return 0, 0, nil
+		}
+	}
+	// 先置 freezing，让 pre-receive 立刻开始拒绝推送；后续任一步失败都能重试续跑。
+	if exam.Status != "freezing" {
+		if err := s.st.SetExamStatus(examID, "freezing"); err != nil {
+			return 0, 0, err
+		}
 	}
 	candidates, err := s.st.ListCandidates(examID)
 	if err != nil {
@@ -316,6 +326,9 @@ func (s *Server) FreezeExam(ctx context.Context, examID, actor string) (int64, i
 		if s.gc == nil {
 			break
 		}
+		if repo, err := s.st.GetRepoByCandidate(c.ID); err == nil && repo.Archived {
+			continue
+		}
 		if err := s.gc.Archive(ctx, c.GiteaUser, c.RepoName); err != nil {
 			s.logf("archive %s/%s failed: %v", c.GiteaUser, c.RepoName, err)
 			continue
@@ -323,9 +336,36 @@ func (s *Server) FreezeExam(ctx context.Context, examID, actor string) (int64, i
 		_ = s.st.MarkRepoArchived(c.ID)
 		archived++
 	}
+	if err := s.st.SetExamStatus(examID, "frozen"); err != nil {
+		return finalized, archived, err
+	}
 	_ = s.st.AddAudit(examID, "admin", actor, "freeze", examID,
 		fmt.Sprintf("finalized=%d archived=%d", finalized, archived))
 	return finalized, archived, nil
+}
+
+func (s *Server) freezePending(examID string) (bool, error) {
+	candidates, err := s.st.ListCandidates(examID)
+	if err != nil {
+		return false, err
+	}
+	for _, c := range candidates {
+		repo, err := s.st.GetRepoByCandidate(c.ID)
+		if err == store.ErrNotFound {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		if s.gc != nil {
+			if !repo.Archived {
+				return true, nil
+			}
+		} else if repo.FinalCommit == "" && !repo.LastPushAt.IsZero() {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // NewJudgeRunner 构造判题器（HTTP 与 CLI 共用）。

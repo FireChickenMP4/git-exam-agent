@@ -47,10 +47,12 @@ exam-2027-20231234/
 
 程序从标准输入读、向标准输出写。判题比较时会忽略行尾空白与末尾空行，其它字符必须完全一致。
 
+运行容器是只读根文件系统，只提供可写的 `/tmp`（64MB）；程序不要依赖在当前目录写文件。
+
 ## 评分
 
 - 每个隐藏用例有独立分值，通过即得分。
-- 题目状态：`accepted`（全过）、`partial`（部分）、`failed`（全错）、`compile_error`、`timeout`、`missing_solution`、`no_cases`。
+- 题目状态：`accepted`（全过）、`partial`（部分）、`failed`（全错）、`compile_error`、`timeout`、`output_limit`（输出超过 1MB 被终止）、`missing_solution`、`no_cases`。
 - 考生总分 = 各题得分之和。
 
 ## 判题运行限制

@@ -174,7 +174,7 @@ func RunOnce(ctx context.Context, cfg *Config, out io.Writer) error {
 	if res.SHA != "" {
 		a.logf("checkpoint commit %s files=%d", shortSHA(res.SHA), len(res.Staged))
 	}
-	if err := a.pushRemote(); err != nil {
+	if err := a.pushWithRecovery(now); err != nil {
 		events.Write("push_fail", map[string]any{"error": err.Error(), "phase": "checkpoint"})
 		return fmt.Errorf("推送失败: %w", err)
 	}
@@ -302,28 +302,7 @@ func (a *Agent) schedulePush(now time.Time) {
 }
 
 func (a *Agent) tryPush(now time.Time) {
-	if err := a.pushRemote(); err != nil {
-		if isNonFastForward(err) {
-			a.logf("push rejected (history diverged), trying recovery")
-			backup, recErr := a.recoverDiverged(now)
-			if recErr == nil {
-				a.fails = 0
-				a.pushPending = false
-				a.lastPush = now
-				a.logf("recovered onto remote main, local backup branch %s", backup)
-				a.events.Write("push_recover", map[string]any{
-					"backup_branch": backup,
-					"commit":        a.commitSHA,
-				})
-				return
-			}
-			a.logf("recovery failed: %v", recErr)
-			a.events.Write("push_recover_fail", map[string]any{
-				"backup_branch": backup,
-				"error":         recErr.Error(),
-			})
-			err = fmt.Errorf("%w; 自动恢复失败: %v", err, recErr)
-		}
+	if err := a.pushWithRecovery(now); err != nil {
 		a.fails++
 		delay := backoffDelay(a.fails)
 		a.nextPush = now.Add(delay)

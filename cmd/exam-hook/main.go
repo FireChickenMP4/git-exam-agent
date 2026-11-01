@@ -262,7 +262,7 @@ func askExamd(examdURL, token, repoPath string, p gate.Push, failOpen bool) erro
 	var out checkResponse
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err := json.Unmarshal(body, &out); err != nil {
-		return fmt.Errorf("examd 返回异常（HTTP %d）", resp.StatusCode)
+		return fmt.Errorf("examd 返回异常（HTTP %d）: %.200s", resp.StatusCode, string(body))
 	}
 	if !out.Allow {
 		if out.Reason == "" {

@@ -111,7 +111,7 @@ func (r *Runner) RunExam(ctx context.Context, examID, onlyStudent string) ([]Can
 	}
 	runID := fmt.Sprintf("%d", time.Now().UnixNano())
 	scope := "judge:" + examID
-	acquired, err := r.st.AcquireJudgeLock(scope, runID, 2*time.Hour)
+	acquired, err := r.st.AcquireJudgeLock(scope, runID, 6*time.Hour)
 	if err != nil {
 		return nil, err
 	}
@@ -120,6 +120,12 @@ func (r *Runner) RunExam(ctx context.Context, examID, onlyStudent string) ([]Can
 	}
 	defer func() { _ = r.st.ReleaseJudgeLock(scope, runID) }()
 	runDir := filepath.Join(r.opts.WorkDir, "repos", runID)
+	defer os.RemoveAll(runDir)
+	if r.opts.Runtime == "docker" {
+		if err := r.probeHostMount(ctx, runDir); err != nil {
+			return nil, err
+		}
+	}
 	problems, err := r.st.ListProblems(examID)
 	if err != nil {
 		return nil, err
@@ -423,13 +429,14 @@ func (r *Runner) runCase(ctx context.Context, outDir, binary string, c store.Tes
 			"--security-opt", "no-new-privileges",
 			"--read-only",
 			"--tmpfs", "/tmp:rw,size=64m",
+			"-w", "/tmp",
 			"-i",
 			"-v", filepath.ToSlash(r.hostPath(outDir)) + ":/out:ro",
 			r.opts.Image,
 		}
 		args = append(args, "/out/"+binary)
 		out = runCommand(ctx, "docker", args, input, "", nil, timeout)
-		if out.timedOut {
+		if out.timedOut || out.limitExceeded {
 			cleanupDocker(name)
 		}
 	} else {
@@ -476,8 +483,35 @@ func (r *Runner) hostPath(p string) string {
 }
 
 func inContainer() bool {
-	_, err := os.Stat("/.dockerenv")
-	return err == nil
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return true
+	}
+	if _, err := os.Stat("/run/.containerenv"); err == nil {
+		return true
+	}
+	return os.Getenv("KUBERNETES_SERVICE_HOST") != ""
+}
+
+// probeHostMount 用一个小容器验证 host_work_dir 与 docker -v 实际挂载一致。
+func (r *Runner) probeHostMount(ctx context.Context, runDir string) error {
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		return err
+	}
+	marker := ".mount-check"
+	if err := os.WriteFile(filepath.Join(runDir, marker), []byte("ok"), 0o644); err != nil {
+		return err
+	}
+	hostRun := filepath.ToSlash(r.hostPath(runDir))
+	out := runCommand(ctx, "docker", []string{
+		"run", "--rm", "--network", "none",
+		"-v", hostRun + ":/check:ro",
+		r.opts.Image,
+		"test", "-f", "/check/" + marker,
+	}, nil, "", nil, 15*time.Second)
+	if out.err != nil {
+		return fmt.Errorf("judge.host_work_dir 与实际挂载不一致（%s）: %s", hostRun, truncate(string(out.stderr), 200))
+	}
+	return nil
 }
 
 // packageDir 返回题目包路径：优先 problems/<key>，否则仓库根目录。

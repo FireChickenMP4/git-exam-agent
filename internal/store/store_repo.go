@@ -242,6 +242,12 @@ func (s *Store) ReleaseJudgeLock(scope, runID string) error {
 	return err
 }
 
+// ClearJudgeLock 强制清除某个场次的判题锁（运维兜底）。
+func (s *Store) ClearJudgeLock(scope string) error {
+	_, err := s.db.Exec(`DELETE FROM judge_lock WHERE scope=?`, scope)
+	return err
+}
+
 // CountCandidates 返回场次考生数。
 func (s *Store) CountCandidates(examID string) (int, error) {
 	var n int

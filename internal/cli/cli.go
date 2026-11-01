@@ -182,8 +182,10 @@ func cmdServe(args []string, out, errOut io.Writer) error {
 	if err != nil {
 		return err
 	}
-	for _, missing := range cfg.SessionSecretMissing() {
-		logf("warn: 未配置 %s，钩子/webhook 相关功能会受限", missing)
+	if gc != nil {
+		for _, missing := range cfg.SessionSecretMissing() {
+			return fmt.Errorf("缺少配置 %s：启用 Gitea 时必须配置", missing)
+		}
 	}
 	srv := httpapi.New(cfg, st, gc, judgeOptions(cfg, gc, logf), logf)
 
@@ -426,6 +428,22 @@ func cmdProblem(args []string, out, errOut io.Writer) error {
 		return err
 	}
 	fmt.Fprintf(out, "imported problems=%d\n", count)
+
+	// 只提示不删除：目录里消失的题目仍留在库里，避免误删导致成绩丢失。
+	entries, _ := os.ReadDir(*dir)
+	keys := map[string]bool{}
+	for _, e := range entries {
+		if e.IsDir() {
+			keys[e.Name()] = true
+		}
+	}
+	if problems, err := st.ListProblems(*examID); err == nil {
+		for _, p := range problems {
+			if !keys[p.Key] {
+				fmt.Fprintf(errOut, "warn: 题目 %s 不在目录中，未从库中删除（需要人工确认）\n", p.Key)
+			}
+		}
+	}
 	return nil
 }
 
@@ -543,6 +561,7 @@ func cmdJudge(args []string, out, errOut io.Writer) error {
 	outPath := fs.String("out", "-", "结果 CSV 路径，- 表示标准输出")
 	student := fs.String("student", "", "只判某学号")
 	runtime := fs.String("runtime", "", "覆盖 judge.runtime（docker/local）")
+	unlock := fs.Bool("unlock", false, "清除该场次的判题锁（上次判题异常中止时使用）")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -563,6 +582,13 @@ func cmdJudge(args []string, out, errOut io.Writer) error {
 	defer st.Close()
 	if _, err := st.GetExam(*examID); err != nil {
 		return err
+	}
+	if *unlock {
+		if err := st.ClearJudgeLock("judge:" + *examID); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "judge lock cleared: %s\n", *examID)
+		return nil
 	}
 
 	logf := loggerTo(errOut)

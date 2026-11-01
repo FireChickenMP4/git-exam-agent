@@ -419,6 +419,28 @@ func TestAdminFlowAndHooks(t *testing.T) {
 		t.Fatalf("final_commit = %s", repo.FinalCommit)
 	}
 
+	// 模拟冻结中途失败：状态停在 freezing、final 为空，重试应能补齐
+	if err := env.st.SetExamStatus("2027-spring", "freezing"); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.st.SetRepoFinalCommit(env.candidate.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := env.handler.FreezeExam(context.Background(), "2027-spring", "retry"); err != nil {
+		t.Fatalf("续跑冻结失败: %v", err)
+	}
+	resumed, err := env.st.GetRepoByCandidate(env.candidate.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed.FinalCommit != "deadbeef" {
+		t.Fatalf("续跑后 final_commit = %s", resumed.FinalCommit)
+	}
+	examNow, err := env.st.GetExam("2027-spring")
+	if err != nil || examNow.Status != "frozen" {
+		t.Fatalf("续跑后状态 = %+v %v", examNow, err)
+	}
+
 	req, _ = http.NewRequest(http.MethodPost, env.srv.URL+"/api/hooks/pre-receive", mustJSON(t, pre))
 	req.Header.Set("X-Exam-Hook-Token", "hook-secret")
 	resp, err = admin.Do(req)

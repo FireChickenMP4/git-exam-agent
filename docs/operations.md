@@ -28,7 +28,10 @@ bash deploy/gitea/init.sh                       # 创建管理员并打印 GITEA
 
 > examd 在容器里判题时，`judge.host_work_dir` 必须是容器内 `work_dir` 对应的宿主机路径
 > （`.env` 里的 `EXAM_HOST_WORK_DIR`，默认 `/srv/exam/data/judge`）。没配会在启动判题时直接报错，
-> 避免 Docker 在宿主上静默建空目录导致全员编译失败。
+> 避免 Docker 在宿主上静默建空目录导致全员编译失败。判题前还会用一个探针容器校验实际挂载。
+>
+> `deploy/gitea/custom` 由宿主用户创建，Gitea 容器里是 uid 1000；属主不对时执行
+> `sudo chown -R 1000:1000 deploy/gitea/custom`。
 
 > examd 镜像构建默认使用 `GOPROXY=https://goproxy.cn,direct`；海外构建机可加
 > `--build-arg GOPROXY=https://proxy.golang.org,direct`。
@@ -99,6 +102,9 @@ $BIN provision -config $CFG -exam 2027-spring -slips slips.csv
 ```bash
 $BIN token -config $CFG -exam 2027-spring -student 20231234
 ```
+
+开通会新建仓库；**开通后请再跑一次** `bash deploy/gitea/install-hooks.sh dist/exam-hook-linux-amd64`
+（幂等），然后在任意一个考生仓库实测：提交一个 `.md` 文件应被 pre-receive 拒绝。
 
 练习仓库：在 Gitea 里建一个普通仓库即可，`allow_unknown_repos: true` 时不受冻结限制。
 

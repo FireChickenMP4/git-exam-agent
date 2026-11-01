@@ -9,4 +9,5 @@ data/
 deploy/signing/certs/
 *.pfx
 deploy/gitea/custom/conf/
+deploy/gitea/custom/hooks/exam-hook
 .DS_Store

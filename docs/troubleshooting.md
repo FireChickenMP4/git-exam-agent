@@ -37,6 +37,21 @@
 | P1-8 | 漏配 judge 段默认 local，学生代码裸跑 | 默认 `docker`；`runtime: local` 必须显式 `judge.allow_local: true` |
 | P2 | 钩子 token 为空、webhook 非 main/零 SHA、提交失败清 dirty、长任务绑定请求 ctx、备份混入 live db、时区解析、CSV BOM、题目内存限制、构建上下文泄密、CSRF、事件时间/配额、文档偏差 | 已逐项修复：见对应代码与测试 |
 
+复审追加：
+
+| 编号 | 问题 | 修复 |
+|---|---|---|
+| R-01 | `-once` 检查点不走自动恢复 | 抽出 `pushWithRecovery`，常驻与 `-once` 共用；新增 RunOnce 分叉恢复测试 |
+| R-02 | 冻结中断后停在 frozen/freezing 无法续跑 | 引入 `freezing` 状态，先拦截推送再处理；frozen 检测到未归档/空 final 会继续补齐，autoFreeze 也处理 freezing |
+| R-03 | host_work_dir 配错仍会静默失败 | 判题前用探针容器校验实际挂载；容器检测补 Podman/K8s |
+| R-04 | 判题锁崩溃后 2 小时不可用 | TTL 改 6 小时，`examd judge -unlock` 可强制清锁 |
+| R-05 | 输出超限可能残留容器；只读根目录误杀写文件解法 | 超限也 `docker rm -f`；运行容器 `-w /tmp`（tmpfs 可写） |
+| R-06 | 报表看不出判题失败原因 | 报表新增 `judge_status` 列 |
+| R-07 | `-init` 与 workspace 里的 agent 配置冲突 | 初始化时忽略 `.exam-agent*` 文件；克隆失败清理半成品 |
+| R-08 | 钩子 token 缺失时钩子错误不可读 | Gitea 启用时缺失 `hook_token`/`webhook_secret` 直接启动失败；钩子解析错误带 HTTP 状态与响应片段 |
+| R-09 | 钩子二进制可能被误提交/打包 | `.gitignore`/`.dockerignore` 排除 `deploy/gitea/custom/hooks/exam-hook` |
+| R-10 | 题目目录删题后库里仍保留 | 导入后只打印“不在目录中”的警告，不自动删除 |
+
 ## 已知边界（本轮已关闭）
 
 | 编号 | 事项 | 处理 | 验证 |

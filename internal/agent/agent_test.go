@@ -216,6 +216,10 @@ func TestInitWorkspace(t *testing.T) {
 	}
 
 	dst := filepath.Join(root, "dst")
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, dst, ".exam-agent.json", "{}")
 	cloneCfg := &Config{Repo: src, Username: "u", Token: "t", Workspace: dst, dir: root}
 	cloneCfg.applyDefaults()
 	if err := InitWorkspace(context.Background(), cloneCfg, &bytes.Buffer{}); err != nil {
@@ -231,14 +235,14 @@ func TestInitWorkspace(t *testing.T) {
 	}
 }
 
-func TestRecoverDiverged(t *testing.T) {
-	ensureGit(t)
+func seededRemote(t *testing.T) (string, string) {
+	t.Helper()
 	root := t.TempDir()
 	remote := filepath.Join(root, "remote.git")
-
-	// 远端先有一个模板提交
 	seed := filepath.Join(root, "seed")
-	os.MkdirAll(seed, 0o755)
+	if err := os.MkdirAll(seed, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	gitRun(t, seed, "init", "-b", "main")
 	writeFile(t, seed, "template.go", "package main\n")
 	gitRun(t, seed, "-c", "user.name=t", "-c", "user.email=t@example.com", "add", ".")
@@ -246,6 +250,12 @@ func TestRecoverDiverged(t *testing.T) {
 	gitRun(t, root, "init", "--bare", "-b", "main", remote)
 	gitRun(t, seed, "remote", "add", "origin", remote)
 	gitRun(t, seed, "push", "-q", "origin", "main")
+	return root, remote
+}
+
+func TestRecoverDiverged(t *testing.T) {
+	ensureGit(t)
+	root, remote := seededRemote(t)
 
 	work := filepath.Join(root, "work")
 	os.MkdirAll(work, 0o755)
@@ -288,6 +298,41 @@ func TestRecoverDiverged(t *testing.T) {
 	}
 	if a.fails != 0 {
 		t.Fatalf("恢复后 fails=%d", a.fails)
+	}
+}
+
+func TestRunOnceRecoversDiverged(t *testing.T) {
+	ensureGit(t)
+	root, remote := seededRemote(t)
+	work := filepath.Join(root, "work")
+	os.MkdirAll(work, 0o755)
+	writeFile(t, work, "candidate.go", "package main\n\n// checkpoint\n")
+	cfg := &Config{Repo: remote, Username: "20231234", Token: "t", Workspace: work, dir: root}
+	cfg.applyDefaults()
+
+	var out bytes.Buffer
+	if err := RunOnce(context.Background(), cfg, &out); err != nil {
+		t.Fatalf("RunOnce 应自动恢复: %v\n%s", err, out.String())
+	}
+
+	r, err := git.PlainOpen(remote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := r.Reference(plumbing.NewBranchReferenceName("main"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit, err := r.CommitObject(ref.Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tree.File("candidate.go"); err != nil {
+		t.Fatal("RunOnce 恢复后远端缺少 candidate.go")
 	}
 }
 

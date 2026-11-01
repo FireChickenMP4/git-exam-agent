@@ -181,7 +181,7 @@ func (s *Server) handlePreReceive(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	grace := time.Duration(s.cfg.Exam.FreezeGraceSeconds) * time.Second
 	switch {
-	case exam.Status == "frozen" || exam.Status == "closed":
+	case exam.Status == "frozen" || exam.Status == "freezing" || exam.Status == "closed":
 		writeJSON(w, http.StatusOK, map[string]any{"allow": false, "reason": "考试已结束，推送被拒绝"})
 		return
 	case !exam.EndsAt.IsZero() && now.After(exam.EndsAt.Add(grace)):

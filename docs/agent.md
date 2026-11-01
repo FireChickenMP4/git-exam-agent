@@ -17,7 +17,8 @@
     `bulk_edit` 事件（文件、增长字节、当前大小）；只统计字节数，不读内容、不碰剪贴板。
     该值设为负数可禁用。
 11. 历史分叉时自动恢复：推送遇到 `non-fast-forward` 时，先把本地 main 备份为
-    `agent-backup-<时间>` 分支，再重置到远端 main、重新提交工作区并推送。
+    `agent-backup-<时间>` 分支，再重置到远端 main、重新提交工作区并推送。备份分支只在本地，
+    不会上传；复核时以 `push_recover` 事件和推送记录为准。
 
 ## 首次初始化（不需要本机 git）
 
@@ -121,7 +122,8 @@ macOS 使用 LaunchAgent，Linux 使用 systemd user unit（`systemctl --user`�
 
 ## 检查点降级
 
-agent 无法常驻时（例如机器策略限制），用同目录的配置文件执行单次检查点：
+agent 无法常驻时（例如机器策略限制），先确认工作区已初始化（`exam-agent -init`，或本地历史与远端一致），
+然后用同目录的配置文件执行单次检查点：
 
 ```bash
 exam-agent -config .exam-agent.json -once

@@ -323,7 +323,9 @@ func (s *Server) handleAdminFreeze(w http.ResponseWriter, r *http.Request) {
 	if admin != nil {
 		actor = admin.Username
 	}
-	finalized, archived, err := s.FreezeExam(r.Context(), exam.ID, actor)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Minute)
+	defer cancel()
+	finalized, archived, err := s.FreezeExam(ctx, exam.ID, actor)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -345,9 +347,11 @@ func (s *Server) handleAdminClose(w http.ResponseWriter, r *http.Request) {
 	if admin != nil {
 		actor = admin.Username
 	}
-	// 先冻结（记录 final commit、归档、拒绝推送），再置 closed。
-	if exam.Status != "frozen" && exam.Status != "closed" {
-		if _, _, err := s.FreezeExam(r.Context(), exam.ID, actor); err != nil {
+	// 先冻结（记录 final commit、归档、拒绝推送），再置 closed；frozen/freezing 会续跑未完成部分。
+	if exam.Status != "closed" {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Minute)
+		defer cancel()
+		if _, _, err := s.FreezeExam(ctx, exam.ID, actor); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
