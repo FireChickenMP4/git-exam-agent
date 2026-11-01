@@ -1,0 +1,45 @@
+# 踩坑与已知问题台账
+
+记录联调/压测中实际遇到的问题、处理方式和遗留边界。新问题按同样格式追加，不要删除历史条目。
+
+## 已修复（有实测依据）
+
+| 编号 | 问题 | 现象 | 处理 |
+|---|---|---|---|
+| K-01 | Gitea 容器无法回调 examd | Gitea 日志 `webhook can only call allowed HTTP servers ... deny '127.0.0.1'`，看板 push_count 始终为 0 | compose 增加 `GITEA__webhook__ALLOWED_HOST_LIST=*`；手工部署在 `app.ini` 加 `[webhook] ALLOWED_HOST_LIST = *`，文档已注明 |
+| K-02 | 容器内 webhook 地址不能用考生访问地址 | examd 在容器/宿主分离时，`public_url` 给考生用，Gitea 容器访问不到 | 新增 `gitea.webhook_url` 覆盖项；compose 默认 `http://examd:8080/api/hooks/gitea` |
+| K-03 | 冻结时的 final commit 可能落后 | webhook 异步投递，手动冻结紧接推送时，`repo.final_commit` 还是上一次提交 | 冻结改为读 Gitea `main` 分支头作为权威 final commit；读不到时回退到最近一次 push_event |
+| K-04 | pre-receive 记录推送产生“幽灵提交” | 并发推送 ref 更新失败，但 pre-receive 已写 push_event，final commit 指向仓库里不存在的对象，判题报 `object not found` | pre-receive 只做放行/拒绝，不再写 push_event；推送记录统一由 post 阶段的 Gitea webhook 写入 |
+| K-05 | 重复开通时令牌回退失败（Gitea 1.22） | 改密接口返回 `[LoginName]: Required`，随后 basic auth 建令牌 401 | `SetPassword` 请求补 `login_name`、`source_id`；实测可改密并用新密码建令牌 |
+| K-06 | 重复开通/重置令牌 400 | `access token name has been used already`（令牌名固定为 `exam-agent`） | 每次签发使用唯一名称 `exam-agent-<纳秒时间戳>` |
+| K-07 | 70 人 Docker 判题过慢 | 每个编译容器都从零编译标准库 | 判题编译容器挂载持久 `GOCACHE`/`GOPATH`（`judge.work_dir/gocache`、`gopath`），70 人全量判题 102.6 秒 |
+| K-08 | 无法确认判题是否真的走了 Docker | 本机同时装了 Go，`local` 与 `docker` 都可能成功 | 压测配置把 `judge.go_bin` 指向不存在的路径，`runtime: docker` 仍 2/2 通过，证明容器路径生效 |
+| K-09 | Windows 上演练脚本用错 bash | `push-load.sh` 被 WSL 的 `/bin/bash` 执行，报 `No such file or directory` | 用 Git for Windows 的 `bin\bash.exe` 执行；`deploy/drill/README.md` 已注明 |
+| K-10 | Docker Desktop 看似“坏了” | `docker info` 只有 Client，没有 Server | 实际是 `com.docker.service` 与 WSL 发行版 `docker-desktop` 都停了；`docker desktop start` 后恢复，不是安装损坏 |
+
+## 已知边界（本轮已关闭）
+
+| 编号 | 事项 | 处理 | 验证 |
+|---|---|---|---|
+| L-01 | agent 只检测网卡/IP | 增加无线 SSID 探测（Windows `netsh`、macOS `airport`/`networksetup`、Linux `iwgetid`/`nmcli`），30 秒缓存，随网络指纹写入 `network_change` | `internal/agent/ssid_test.go` 覆盖三种输出解析 |
+| L-02 | `agent_event` 只落本地 | 新增 `POST /api/agent/events`（考生令牌鉴权），写入 `agent_event` 表；看板增加“agent 事件”列；agent 配置 `examd_url` 后自动上报 | httpapi 测试校验事件落库与错误令牌 401 |
+| L-03 | 登录无限流 | 考生/管理端登录按 IP 做令牌桶限流（10 次/分钟），超限返回 429 | `internal/httpapi/limiter_test.go` |
+| L-04 | 自签名 HTTPS 无 CA 配置 | 新增 `gitea.ca_file`，同时用于 Gitea API、模板推送、判题 clone；agent 增加 `ca_file` / `insecure_skip_verify` | Gitea 客户端坏 CA 报错测试；go-git 使用 `CABundle`/`InsecureSkipTLS`；自签名证书全链路未联调 |
+| L-05 | 手动冻结可能落后一次推送 | 冻结以 Gitea `main` 分支头为准，读不到才回退 push_event | 70 人压测中 final_commit 与分支头一致、缺失 0 |
+| L-06 | 检查点模式依赖手动 git | `exam-agent -once` 执行一次提交+推送，不需要本机 git | `TestRunOnceCheckpoint` 对 bare 仓库实测 |
+| L-07 | 70 台真机未演练 | 按约定用 70 客户端压测关闭软件侧；真机现场演练仍列入运维清单 | 70/70 开通、70/70 推送、Docker 判题 70 人 |
+| L-08 | 目录未初始化 git | 已 `git init` 并创建首个提交，后续按正常流程提交 | `git log --oneline` 可见初始提交 |
+
+## 仍需现场执行
+
+| 事项 | 说明 |
+|---|---|
+| 70 台真机 + AP + DHCP | 软件端已用 70 并发客户端验证；真机环境按 `deploy/drill/README.md` 在 T-7 执行 |
+| 真实断电 | 已做“强杀 examd + 备份恢复”演练；市电断电需现场配合 |
+| 真实拔网线 | 已用停 Gitea 模拟连接拒绝与恢复补推；物理断网可在现场复跑同一流程 |
+
+## 复现记录
+
+- 70 客户端压测：开通 39.8s、并发推送 18.3s、看板 70/70、冻结 final commit 缺失 0、Docker 判题 102.6s。
+- 断网演练：停 Gitea 20s，agent 出现 `push failed`（2s/4s/8s/16s 退避），Gitea 恢复后自动补推。
+- 崩溃恢复：强杀 examd 后重启数据正常；备份包恢复到全新目录后报表逐行一致。

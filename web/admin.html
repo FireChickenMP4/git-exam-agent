@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>examd 管理台</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; background: #f5f6f8; color: #1b1f24; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 20px; }
+  .hidden { display: none !important; }
+  h1 { font-size: 20px; margin: 0 0 14px; }
+  h2 { font-size: 15px; margin: 0 0 10px; color: #4a5260; }
+  section { background: #fff; border: 1px solid #e3e7ee; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+  label { font-size: 13px; color: #4a5260; }
+  input, select, textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid #cdd3dc; border-radius: 8px;
+    font-size: 14px; font-family: inherit; background: #fff;
+  }
+  textarea { min-height: 90px; resize: vertical; }
+  button { padding: 7px 12px; font-size: 14px; border: 1px solid #cdd3dc; border-radius: 8px; background: #fff; cursor: pointer; }
+  button.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  button.danger { background: #c62828; border-color: #c62828; color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+  .row > div { flex: 1 1 160px; }
+  .row > div.small { flex: 0 0 auto; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eef0f4; }
+  th { color: #6b7484; font-weight: 500; }
+  tr.gap td { background: #fdecea; }
+  tr.warn td { background: #fff6e5; }
+  pre { background: #0f1720; color: #d8e1ea; padding: 12px; border-radius: 8px; overflow: auto; max-height: 320px; font-size: 12px; }
+  .muted { color: #8a93a2; font-size: 12px; }
+  #login { max-width: 380px; margin-top: 12vh; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<section id="login" class="hidden">
+  <h1>examd 管理台</h1>
+  <form id="login-form">
+    <label>用户名<input id="admin-user" required></label>
+    <label>密码<input id="admin-pass" type="password" required></label>
+    <p></p>
+    <button class="primary" type="submit">登录</button>
+  </form>
+  <p id="login-error" class="muted"></p>
+</section>
+
+<div id="app" class="hidden">
+  <section>
+    <h1>examd 管理台</h1>
+    <div class="row">
+      <div>
+        <label>选择场次</label>
+        <select id="exam-select"></select>
+      </div>
+      <div class="small"><button id="refresh">刷新</button></div>
+      <div class="small"><button id="logout">退出</button></div>
+    </div>
+    <p class="muted" id="exam-meta"></p>
+  </section>
+
+  <div class="grid">
+    <section>
+      <h2>新建场次</h2>
+      <label>场次 ID<input id="exam-id" placeholder="2027-spring"></label>
+      <label>标题<input id="exam-title-input" placeholder="2027 春季招新机试"></label>
+      <div class="row">
+        <div><label>开始时间<input id="exam-start" type="datetime-local"></label></div>
+        <div><label>结束时间<input id="exam-end" type="datetime-local"></label></div>
+      </div>
+      <p></p>
+      <button class="primary" id="create-exam">创建</button>
+    </section>
+
+    <section>
+      <h2>名单（CSV：student_no,name,track,variant）</h2>
+      <textarea id="roster" placeholder="student_no,name,track,variant&#10;20231234,张三,A,A&#10;20231235,李四,B,B"></textarea>
+      <p></p>
+      <div class="row">
+        <div class="small"><button id="import-roster">导入名单</button></div>
+        <div class="small"><input id="roster-file" type="file" accept=".csv,text/csv"></div>
+      </div>
+    </section>
+  </div>
+
+  <section>
+    <h2>考试控制</h2>
+    <div class="row">
+      <div class="small"><button id="btn-provision">批量开通</button></div>
+      <div class="small"><button id="btn-start">开考</button></div>
+      <div class="small"><button class="danger" id="btn-freeze">冻结</button></div>
+      <div class="small"><button id="btn-close">封存</button></div>
+      <div class="small"><button id="btn-export">导出报表</button></div>
+      <div class="small"><button id="btn-judge">批量判题</button></div>
+      <div class="small"><button id="btn-backup">备份</button></div>
+    </div>
+    <p class="muted">开通后如有令牌丢失，请用 <code>examd token -config ... -exam ... -student ...</code> 重置。</p>
+  </section>
+
+  <section>
+    <h2>公告</h2>
+    <textarea id="notice-text" placeholder="考试期间公告，例如：距离结束还有 10 分钟"></textarea>
+    <p></p>
+    <button id="btn-notice">发布公告</button>
+  </section>
+
+  <section>
+    <h2>监考看板</h2>
+    <p class="muted">每 5 秒刷新；最后推送超过 2 分钟标黄，超过 3 分钟标红。</p>
+    <div style="overflow:auto">
+      <table>
+        <thead>
+          <tr><th>学号</th><th>姓名</th><th>赛道</th><th>状态</th><th>推送次数</th><th>最后推送</th><th>agent 事件</th><th>final commit</th></tr>
+        </thead>
+        <tbody id="live-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>操作输出</h2>
+    <pre id="output">（无）</pre>
+  </section>
+</div>
+
+</div>
+<script>
+(function () {
+  "use strict";
+  var state = { exam: null, timer: null };
+
+  function el(id) { return document.getElementById(id); }
+  function show(n) { n.classList.remove("hidden"); }
+  function hide(n) { n.classList.add("hidden"); }
+  function out(v) { el("output").textContent = typeof v === "string" ? v : JSON.stringify(v, null, 2); }
+
+  function api(method, path, body) {
+    var opt = { method: method, credentials: "same-origin", headers: {} };
+    if (body !== undefined) {
+      opt.headers["Content-Type"] = "application/json";
+      opt.body = JSON.stringify(body);
+    }
+    return fetch(path, opt).then(function (r) {
+      return r.text().then(function (text) {
+        var data = null;
+        try { data = text ? JSON.parse(text) : null; } catch (e) { data = { error: text }; }
+        if (!r.ok) { throw new Error((data && data.error) || ("HTTP " + r.status)); }
+        return data;
+      });
+    });
+  }
+
+  function fmt(ts) {
+    if (!ts) { return "—"; }
+    var d = new Date(ts);
+    if (isNaN(d.getTime())) { return "—"; }
+    return d.toLocaleString();
+  }
+
+  function examId() { return state.exam ? state.exam.id : ""; }
+
+  function loadExams() {
+    return api("GET", "/api/admin/exams").then(function (data) {
+      var sel = el("exam-select");
+      sel.innerHTML = "";
+      (data.exams || []).forEach(function (e) {
+        var opt = document.createElement("option");
+        opt.value = e.id;
+        opt.textContent = e.id + " · " + e.title + " · " + e.status;
+        sel.appendChild(opt);
+      });
+      if (data.exams && data.exams.length) {
+        var keep = state.exam && data.exams.some(function (e) { return e.id === state.exam.id; });
+        state.exam = keep ? data.exams.filter(function (e) { return e.id === state.exam.id; })[0] : data.exams[0];
+        sel.value = state.exam.id;
+      }
+      renderExam();
+    });
+  }
+
+  function renderExam() {
+    el("exam-meta").textContent = state.exam
+      ? "状态：" + state.exam.status + " ｜ 开始：" + fmt(state.exam.starts_at) + " ｜ 结束：" + fmt(state.exam.ends_at)
+      : "尚未创建场次";
+  }
+
+  function loadLive() {
+    if (!examId()) { el("live-body").innerHTML = ""; return; }
+    api("GET", "/api/admin/exams/" + encodeURIComponent(examId()) + "/live").then(function (data) {
+      var body = el("live-body");
+      body.innerHTML = "";
+      (data.rows || []).forEach(function (r) {
+        var tr = document.createElement("tr");
+        var klass = r.level === "gap" ? "gap" : (r.level === "warn" ? "warn" : "");
+        if (klass) { tr.className = klass; }
+        [r.student_no, r.name, r.track, r.status, String(r.push_count), fmt(r.last_push_at),
+         r.last_agent_type ? (r.last_agent_type + " " + fmt(r.last_agent_at)) : "—",
+         r.final_commit || "—"]
+          .forEach(function (v) {
+            var td = document.createElement("td");
+            td.textContent = v;
+            tr.appendChild(td);
+          });
+        body.appendChild(tr);
+      });
+    }).catch(function () {});
+  }
+
+  function startLive() {
+    clearInterval(state.timer);
+    loadLive();
+    state.timer = setInterval(loadLive, 5000);
+  }
+
+  function setExamFromSelect() {
+    var id = el("exam-select").value;
+    api("GET", "/api/admin/exams").then(function (data) {
+      state.exam = (data.exams || []).filter(function (e) { return e.id === id; })[0] || null;
+      renderExam();
+      startLive();
+    });
+  }
+
+  function examAction(action, extra) {
+    if (!examId()) { out("请先选择场次"); return; }
+    var body = extra === undefined ? {} : extra;
+    api("POST", "/api/admin/exams/" + encodeURIComponent(examId()) + "/" + action, body)
+      .then(function (data) { out(data); return loadExams(); })
+      .then(loadLive)
+      .catch(function (e) { out("失败：" + e.message); });
+  }
+
+  el("login-form").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    api("POST", "/api/admin/auth/login", {
+      username: el("admin-user").value.trim(),
+      password: el("admin-pass").value
+    }).then(function () {
+      hide(el("login")); show(el("app"));
+      loadExams().then(startLive);
+    }).catch(function (e) { el("login-error").textContent = e.message; });
+  });
+
+  el("logout").addEventListener("click", function () {
+    api("POST", "/api/admin/auth/logout").finally(function () { location.reload(); });
+  });
+
+  el("refresh").addEventListener("click", function () {
+    loadExams().then(startLive);
+  });
+
+  el("exam-select").addEventListener("change", setExamFromSelect);
+
+  el("create-exam").addEventListener("click", function () {
+    var start = el("exam-start").value ? new Date(el("exam-start").value).toISOString() : "";
+    var end = el("exam-end").value ? new Date(el("exam-end").value).toISOString() : "";
+    api("POST", "/api/admin/exams", {
+      id: el("exam-id").value.trim(),
+      title: el("exam-title-input").value.trim(),
+      starts_at: start,
+      ends_at: end
+    }).then(function (data) {
+      out(data);
+      return loadExams();
+    }).then(startLive).catch(function (e) { out("失败：" + e.message); });
+  });
+
+  el("roster-file").addEventListener("change", function (ev) {
+    var file = ev.target.files[0];
+    if (!file) { return; }
+    var reader = new FileReader();
+    reader.onload = function () { el("roster").value = reader.result; };
+    reader.readAsText(file);
+  });
+
+  el("import-roster").addEventListener("click", function () {
+    examAction("roster", { csv: el("roster").value });
+  });
+
+  el("btn-provision").addEventListener("click", function () { examAction("provision"); });
+  el("btn-start").addEventListener("click", function () { examAction("start"); });
+  el("btn-freeze").addEventListener("click", function () {
+    if (confirm("冻结后所有推送将被拒绝，确定？")) { examAction("freeze"); }
+  });
+  el("btn-close").addEventListener("click", function () { examAction("close"); });
+  el("btn-export").addEventListener("click", function () {
+    if (!examId()) { return; }
+    window.open("/api/admin/exams/" + encodeURIComponent(examId()) + "/export.csv", "_blank");
+  });
+  el("btn-judge").addEventListener("click", function () {
+    if (confirm("开始批量判题？耗时可能较长。")) { examAction("judge"); }
+  });
+  el("btn-backup").addEventListener("click", function () { examAction("backup"); });
+  el("btn-notice").addEventListener("click", function () {
+    examAction("notice", { content: el("notice-text").value.trim() });
+  });
+
+  api("GET", "/api/admin/exams").then(function () {
+    hide(el("login")); show(el("app"));
+    loadExams().then(startLive);
+  }).catch(function () {
+    show(el("login"));
+  });
+})();
+</script>
+</body>
+</html>

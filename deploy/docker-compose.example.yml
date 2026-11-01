@@ -1,0 +1,61 @@
+# 考场部署示例：Gitea + examd。
+# 使用方式：
+#   cp deploy/.env.example deploy/.env   # 修改口令
+#   cp deploy/config-example.yaml deploy/config.yaml
+#   docker compose -f deploy/docker-compose.example.yml up -d
+#
+# 说明：
+# - 考试期间不接 WAN；两个服务都只监听内网。
+# - examd 挂载 docker.sock 是为了以 docker runtime 判题；不使用判题可不挂。
+# - Gitea 的 custom 目录挂出来，方便放 pre-receive 钩子。
+
+services:
+  gitea:
+    image: gitea/gitea:1.22
+    container_name: exam-gitea
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+      - GITEA__server__DOMAIN=10.0.0.10
+      - GITEA__server__HTTP_PORT=3000
+      - GITEA__server__ROOT_URL=${GITEA_ROOT_URL}
+      - GITEA__server__DISABLE_SSH=true
+      - GITEA__security__INSTALL_LOCK=true
+      - GITEA__service__DISABLE_REGISTRATION=true
+      - GITEA__repository__DEFAULT_BRANCH=main
+      - GITEA__repository__DEFAULT_PRIVATE=private
+      - GITEA__webhook__ALLOWED_HOST_LIST=*
+      - EXAM_HOOK_URL=http://examd:8080
+      - EXAM_HOOK_TOKEN=${EXAM_HOOK_TOKEN}
+    volumes:
+      - gitea-data:/data
+      - ./gitea/custom:/data/gitea
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  examd:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: examd
+    environment:
+      - GITEA_ADMIN_USER=${GITEA_ADMIN_USER}
+      - GITEA_ADMIN_PASSWORD=${GITEA_ADMIN_PASSWORD}
+      - GITEA_ADMIN_TOKEN=${GITEA_ADMIN_TOKEN}
+      - EXAM_WEBHOOK_SECRET=${EXAM_WEBHOOK_SECRET}
+      - EXAM_HOOK_TOKEN=${EXAM_HOOK_TOKEN}
+      - EXAM_WEBHOOK_URL=${EXAM_WEBHOOK_URL:-http://examd:8080/api/hooks/gitea}
+      - TZ=Asia/Shanghai
+    volumes:
+      - ../data:/app/data
+      - ./config.yaml:/app/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "8080:8080"
+    depends_on:
+      - gitea
+    restart: unless-stopped
+
+volumes:
+  gitea-data:

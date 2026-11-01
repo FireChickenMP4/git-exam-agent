@@ -1,0 +1,13 @@
+[Unit]
+Description=exam-agent 自动提交与推送
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/exam-agent -config %h/exam-2027/.exam-agent.json
+WorkingDirectory=%h/exam-2027
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,6 @@
+#!/bin/sh
+# Gitea pre-receive 钩子入口：cwd 是裸仓库目录。
+# examd 地址与令牌来自 Gitea 容器环境变量（见 docker-compose.example.yml）。
+exec /data/gitea/custom/hooks/exam-hook \
+  --examd "${EXAM_HOOK_URL:-http://examd:8080}" \
+  --token "${EXAM_HOOK_TOKEN:-}"

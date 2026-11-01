@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>机试</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f5f6f8; color: #1b1f24; -webkit-user-select: none; user-select: none;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px; }
+  .hidden { display: none !important; }
+  h1 { font-size: 22px; margin: 0 0 16px; }
+  h2 { font-size: 15px; margin: 18px 0 8px; color: #4a5260; }
+  label { display: block; margin: 12px 0; font-size: 14px; color: #4a5260; }
+  input {
+    display: block; width: 100%; margin-top: 6px; padding: 10px 12px; font-size: 15px;
+    border: 1px solid #cdd3dc; border-radius: 8px; background: #fff; -webkit-user-select: text; user-select: text;
+  }
+  button {
+    padding: 8px 14px; font-size: 14px; border: 1px solid #cdd3dc; border-radius: 8px;
+    background: #fff; cursor: pointer;
+  }
+  button.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  #login { max-width: 420px; margin-top: 12vh; background: #fff; border: 1px solid #e3e7ee; border-radius: 12px; }
+  .error { color: #c62828; min-height: 18px; font-size: 13px; }
+  #exam header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  #exam-title { font-size: 18px; font-weight: 600; flex: 1; }
+  #countdown { font-variant-numeric: tabular-nums; font-size: 18px; color: #1f6feb; }
+  .layout { display: grid; grid-template-columns: 240px 1fr; gap: 16px; }
+  aside, main { background: #fff; border: 1px solid #e3e7ee; border-radius: 12px; padding: 14px; }
+  #problem-list { list-style: none; padding: 0; margin: 0; }
+  #problem-list li {
+    padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 14px; margin-bottom: 4px;
+  }
+  #problem-list li:hover { background: #eef3fb; }
+  #problem-list li.active { background: #1f6feb; color: #fff; }
+  #notice-list { list-style: none; padding: 0; margin: 0; font-size: 13px; color: #4a5260; }
+  #notice-list li { padding: 6px 0; border-bottom: 1px dashed #e3e7ee; white-space: pre-wrap; }
+  #repo { margin-top: 16px; font-size: 12px; color: #8a93a2; word-break: break-all; }
+  #statement { min-height: 65vh; line-height: 1.7; font-size: 15px; -webkit-user-select: none; user-select: none; }
+  #statement h1, #statement h2, #statement h3 { color: #1b1f24; }
+  #statement pre {
+    background: #f5f6f8; padding: 10px; border-radius: 8px; overflow: auto;
+    font-size: 13px; -webkit-user-select: none; user-select: none;
+  }
+  #statement code { background: #f0f2f5; padding: 1px 4px; border-radius: 4px; }
+  .modal {
+    position: fixed; inset: 0; background: rgba(20, 24, 30, .45); display: flex;
+    align-items: center; justify-content: center; z-index: 20;
+  }
+  .modal-body { background: #fff; border-radius: 12px; padding: 22px; width: min(560px, 92vw); }
+  .modal-body ul { line-height: 1.8; color: #4a5260; font-size: 14px; }
+  #watermark {
+    position: fixed; inset: 0; pointer-events: none; z-index: 30; overflow: hidden; opacity: .055;
+    display: flex; flex-wrap: wrap; align-content: flex-start; gap: 0;
+  }
+  #watermark span {
+    width: 340px; height: 110px; font-size: 15px; color: #000; transform: rotate(-24deg);
+    white-space: nowrap; padding-top: 40px; text-align: center;
+  }
+  #blur-overlay {
+    position: fixed; inset: 0; z-index: 40; background: rgba(240, 242, 245, .97);
+    display: flex; align-items: center; justify-content: center; font-size: 18px; color: #4a5260;
+  }
+  @media print { body { display: none !important; } }
+  @media (max-width: 820px) { .layout { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div id="watermark"></div>
+<div id="blur-overlay" class="hidden">已离开考试页面，请立即返回</div>
+
+<section id="login" class="wrap">
+  <h1>2027 春季招新机试</h1>
+  <form id="login-form" autocomplete="off">
+    <label>学号<input id="student-no" required></label>
+    <label>考试令牌<input id="token" type="password" required></label>
+    <button class="primary" type="submit">登录</button>
+    <p id="login-error" class="error"></p>
+  </form>
+</section>
+
+<section id="exam" class="wrap hidden">
+  <header>
+    <div id="exam-title"></div>
+    <div id="countdown"></div>
+    <button id="logout">退出</button>
+  </header>
+  <div class="layout">
+    <aside>
+      <h2>题目</h2>
+      <ul id="problem-list"></ul>
+      <h2>公告</h2>
+      <ul id="notice-list"></ul>
+      <div id="repo"></div>
+    </aside>
+    <main id="statement"><p class="error">从左侧选择题目</p></main>
+  </div>
+</section>
+
+<section id="consent" class="modal hidden">
+  <div class="modal-body">
+    <h2>考试须知</h2>
+    <ul>
+      <li>考试期间仅可使用本地编辑器与 Go 工具链，禁止使用手机、即时通讯或外部设备。</li>
+      <li>代码通过 exam-agent 自动推送到考场服务器，推送时间以服务器为准。</li>
+      <li>题面带有本人水印，禁止截图、拍照、复制或传播。</li>
+      <li>考试结束后推送将被拒绝，以服务器记录的最终提交为准。</li>
+    </ul>
+    <button id="consent-accept" class="primary">我已阅读并同意</button>
+  </div>
+</section>
+
+<script>
+(function () {
+  "use strict";
+  var state = { me: null, problems: [], active: null, timer: null };
+
+  function el(id) { return document.getElementById(id); }
+  function show(node) { node.classList.remove("hidden"); }
+  function hide(node) { node.classList.add("hidden"); }
+
+  function api(method, path, body) {
+    var opt = { method: method, credentials: "same-origin", headers: {} };
+    if (body !== undefined) {
+      opt.headers["Content-Type"] = "application/json";
+      opt.body = JSON.stringify(body);
+    }
+    return fetch(path, opt).then(function (r) {
+      return r.text().then(function (text) {
+        var data = null;
+        try { data = text ? JSON.parse(text) : null; } catch (e) { data = { error: text }; }
+        if (!r.ok) { throw new Error((data && data.error) || ("HTTP " + r.status)); }
+        return data;
+      });
+    });
+  }
+
+  function paintWatermark() {
+    var box = el("watermark");
+    if (!state.me) { box.innerHTML = ""; return; }
+    var stamp = state.me.student_no + " " + state.me.name + " " + new Date().toLocaleString();
+    var html = "";
+    for (var i = 0; i < 60; i++) { html += "<span>" + stamp + "</span>"; }
+    box.innerHTML = html;
+  }
+
+  function startTimer(seconds) {
+    clearInterval(state.timer);
+    function tick() {
+      if (seconds <= 0) { el("countdown").textContent = "已结束"; return; }
+      var h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60), s = seconds % 60;
+      el("countdown").textContent = (h ? h + ":" : "") +
+        String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+      seconds--;
+    }
+    tick();
+    state.timer = setInterval(tick, 1000);
+  }
+
+  function renderProblems() {
+    var list = el("problem-list");
+    list.innerHTML = "";
+    state.problems.forEach(function (p) {
+      var li = document.createElement("li");
+      li.textContent = p.title + " (" + p.score + " 分)";
+      li.dataset.key = p.key;
+      li.addEventListener("click", function () { openProblem(p.key, li); });
+      list.appendChild(li);
+    });
+  }
+
+  function openProblem(key, li) {
+    api("GET", "/api/problems/" + encodeURIComponent(key)).then(function (p) {
+      Array.prototype.forEach.call(el("problem-list").children, function (n) {
+        n.classList.toggle("active", n === li);
+      });
+      el("statement").innerHTML = p.statement_html ||
+        "<p class='error'>题面为空</p>";
+      state.active = key;
+    }).catch(function (e) {
+      el("statement").innerHTML = "<p class='error'>" + e.message + "</p>";
+    });
+  }
+
+  function loadNotices() {
+    api("GET", "/api/notice").then(function (data) {
+      var list = el("notice-list");
+      list.innerHTML = "";
+      (data.notices || []).forEach(function (n) {
+        var li = document.createElement("li");
+        li.textContent = new Date(n.t).toLocaleTimeString() + " " + n.content;
+        list.appendChild(li);
+      });
+      if (!list.children.length) {
+        var li = document.createElement("li");
+        li.textContent = "暂无公告";
+        list.appendChild(li);
+      }
+    }).catch(function () {});
+  }
+
+  function refreshStatus() {
+    return api("GET", "/api/status").then(function (s) {
+      startTimer(s.seconds_left);
+      el("exam-title").textContent = s.exam.title + " · " + s.exam.status_text;
+      return s;
+    });
+  }
+
+  function enterExam(me) {
+    state.me = me;
+    hide(el("login"));
+    show(el("exam"));
+    el("exam-title").textContent = me.exam_title;
+    el("repo").textContent = me.repo_url ? "仓库：" + me.repo_url : "";
+    paintWatermark();
+    refreshStatus().catch(function () {});
+    loadNotices();
+    api("GET", "/api/problems").then(function (data) {
+      state.problems = data.problems || [];
+      renderProblems();
+    });
+    api("GET", "/api/consent").then(function (c) {
+      if (!c.accepted) { show(el("consent")); } else { hide(el("consent")); }
+    });
+  }
+
+  el("login-form").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    el("login-error").textContent = "";
+    api("POST", "/api/login", {
+      student_no: el("student-no").value.trim(),
+      token: el("token").value.trim()
+    }).then(function (me) {
+      enterExam(me);
+    }).catch(function (e) {
+      el("login-error").textContent = e.message;
+    });
+  });
+
+  el("logout").addEventListener("click", function () {
+    api("POST", "/api/logout").finally(function () { location.reload(); });
+  });
+
+  el("consent-accept").addEventListener("click", function () {
+    api("POST", "/api/consent", {}).then(function () {
+      hide(el("consent"));
+    }).catch(function (e) { alert(e.message); });
+  });
+
+  document.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+  document.addEventListener("copy", function (e) { e.preventDefault(); });
+  document.addEventListener("cut", function (e) { e.preventDefault(); });
+  document.addEventListener("selectstart", function (e) { e.preventDefault(); });
+  document.addEventListener("keydown", function (e) {
+    if ((e.ctrlKey || e.metaKey) && ["p", "s", "c"].indexOf(e.key.toLowerCase()) >= 0) {
+      e.preventDefault();
+    }
+  });
+  window.addEventListener("beforeprint", function (e) { e.preventDefault(); });
+  document.addEventListener("visibilitychange", function () {
+    el("blur-overlay").classList.toggle("hidden", !document.hidden);
+  });
+
+  setInterval(function () {
+    if (!state.me) { return; }
+    paintWatermark();
+    refreshStatus().catch(function () {});
+  }, 30000);
+  setInterval(loadNotices, 60000);
+
+  api("GET", "/api/me").then(function (me) {
+    if (me && me.student_no) { enterExam(me); }
+  }).catch(function () {});
+})();
+</script>
+</body>
+</html>

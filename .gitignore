@@ -1,0 +1,9 @@
+bin/
+dist/
+data/
+*.exe
+*.test
+.exam-agent.json
+.exam-agent.events.jsonl
+.exam-agent.log
+.DS_Store

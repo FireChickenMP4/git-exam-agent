@@ -1,0 +1,47 @@
+# examd 配置示例
+# 所有字符串都支持 ${ENV} 展开，机密项建议放在环境变量里。
+
+listen: ":8080"
+public_url: "http://10.0.0.10:8080"
+
+db: "data/examd.db"
+data_dir: "data"
+
+gitea:
+  url: "http://10.0.0.10:3000"
+  # 管理员账号；token 优先，留空时用用户名口令
+  admin_user: "exam-admin"
+  admin_password: "${GITEA_ADMIN_PASSWORD}"
+  admin_token: "${GITEA_ADMIN_TOKEN}"
+  # Gitea webhook 的 HMAC 密钥
+  webhook_secret: "${EXAM_WEBHOOK_SECRET}"
+  # Gitea 回调 examd 的地址；examd 与 Gitea 都在 compose 里时填 http://examd:8080/api/hooks/gitea，
+  # 留空则使用 public_url + /api/hooks/gitea
+  webhook_url: "${EXAM_WEBHOOK_URL}"
+  # pre-receive 钩子与 examd 之间的共享令牌
+  hook_token: "${EXAM_HOOK_TOKEN}"
+  # 自签名 HTTPS 时填 CA 证书路径；同时用于 Gitea API、模板推送和判题 clone
+  ca_file: ""
+  insecure_skip_verify: false
+  # 未登记的仓库（如练习仓库）是否允许推送
+  allow_unknown_repos: true
+
+judge:
+  # docker：用 exam-go 镜像判题；local：直接调用本机 go
+  runtime: "docker"
+  image: "exam-go:1.26"
+  go_bin: "go"
+  work_dir: "data/judge"
+  compile_timeout_seconds: 10
+  run_timeout_ms: 3000
+  memory_mb: 256
+  compile_concurrency: 2
+  run_concurrency: 8
+
+exam:
+  # 到点后再宽限多少秒才拒绝推送
+  freeze_grace_seconds: 30
+  consent_version: "v1"
+  # 到点自动冻结（记录 final commit、归档仓库）
+  auto_freeze: true
+  repo_prefix: "exam-2027-"

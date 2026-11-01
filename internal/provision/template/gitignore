@@ -1,0 +1,4 @@
+.exam-agent.json
+.exam-agent.events.jsonl
+*.exe
+*.test
