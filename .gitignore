@@ -6,8 +6,17 @@ data/
 .exam-agent.json
 .exam-agent.events.jsonl
 .exam-agent.log
+
+# 本地部署配置与凭据（.env.example / config-example.yaml 才是模板）
+deploy/.env
+deploy/config.yaml
+
 deploy/signing/certs/
 *.pfx
 deploy/gitea/custom/conf/
 deploy/gitea/custom/hooks/exam-hook
+
+# roster/slips/results/review/report 导出：含学号、姓名、一次性令牌与成绩
+*.csv
+
 .DS_Store
